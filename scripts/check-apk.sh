@@ -1,5 +1,5 @@
 #!/bin/sh
-# Smoke-check the built debug APK: native libs, 16 KB alignment, permissions, no secrets.
+# Smoke-check the built debug APK: native libs (ARM + x86_64), 16 KB alignment, permissions, no secrets.
 # Usage: scripts/check-apk.sh [APK]
 set -eu
 cd "$(dirname "$0")/.."
@@ -11,10 +11,11 @@ err() { echo "FAIL: $*" >&2; fail=1; }
 
 [ -s "$apk" ] || { echo "FAIL: no APK at $apk" >&2; exit 1; }
 listing=$(unzip -l "$apk")
-for abi in arm64-v8a armeabi-v7a; do
+for abi in arm64-v8a armeabi-v7a x86_64; do
     echo "$listing" | grep -q "lib/$abi/libwg-go.so" || err "lib/$abi/libwg-go.so missing"
 done
-echo "$listing" | grep -qE 'lib/(x86|x86_64)/' && err "x86 libraries present (abiFilters not applied)"
+# x86_64 is for redroid (debug builds); 32-bit x86 has no use here.
+echo "$listing" | grep -qE 'lib/x86/' && err "32-bit x86 libraries present (abiFilters not applied)"
 echo "$listing" | grep -qiE '\.(conf|key)$' && err "a .conf or .key file is packaged"
 "$bt/zipalign" -c -P 16 4 "$apk" || err "not 16 KB zip-aligned"
 

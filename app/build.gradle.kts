@@ -14,13 +14,16 @@ android {
         versionCode = 4
         versionName = "0.2.3"
 
-        // Phones only: keep the prebuilt wireguard-go libraries for ARM, drop x86.
+        // Phones: keep the prebuilt wireguard-go libraries for ARM, drop x86.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
+            // Debug builds also run in redroid (x86_64 Android in Docker, scripts/emulator.sh),
+            // so the same debug APK works on the phone and in the container. No 32-bit x86.
+            ndk { abiFilters += "x86_64" }
         }
     }
 
