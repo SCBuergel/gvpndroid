@@ -31,11 +31,21 @@ Output: `app/build/outputs/apk/debug/app-debug.apk` (package `org.gnosisvpn.stub
 
 ## Install on a phone
 
-Download the APK on the phone and open it (allow "install unknown apps" for the app
-you opened it with), or use adb over Wi-Fi:
+The developer's main phone profile is signed in to a Google account enrolled in
+Google's Advanced Protection Program, which blocks every app not from Google Play
+("App blocked by Advanced Protection"), even with the phone's own Device protection
+switch off. The app is therefore tested in a separate Android user profile that has
+no Google account. That profile has no access to Claude sessions, so builds reach it
+through a short-lived public link (litterbox.catbox.moe, 1 hour expiry), typed into
+Chrome there:
+
+    curl -F reqtype=fileupload -F time=1h -F fileToUpload=@app/build/outputs/apk/debug/app-debug.apk \
+        https://litterbox.catbox.moe/resources/internals/api.php
+
+Alternatively, adb over Wi-Fi (untested on this phone; may be blocked by Advanced Protection):
 
     . ~/android/env.sh
     adb pair PHONE_IP:PAIR_PORT       # code from Developer options > Wireless debugging > Pair
     adb connect PHONE_IP:PORT
-    adb install -r app/build/outputs/apk/debug/app-debug.apk
+    adb install -r --user USER_ID app/build/outputs/apk/debug/app-debug.apk
     adb logcat -s GnosisVpnStub
