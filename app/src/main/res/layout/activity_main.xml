@@ -69,6 +69,31 @@
         android:fontFamily="monospace"
         android:textSize="13sp" />
 
+    <LinearLayout
+        android:id="@+id/fundingBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingBottom="8dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/fundingQr"
+            android:layout_width="200dp"
+            android:layout_height="200dp"
+            android:contentDescription="Node address QR code" />
+
+        <TextView
+            android:id="@+id/fundingText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:gravity="center_horizontal"
+            android:textIsSelectable="true"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <ScrollView
         android:id="@+id/logScroll"
         android:layout_width="match_parent"

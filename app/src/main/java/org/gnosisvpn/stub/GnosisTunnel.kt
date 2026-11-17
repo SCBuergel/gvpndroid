@@ -114,6 +114,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 lastSummary = summary
                 if (runMode == "preparing_safe") logFundingNeed(data.getJSONObject("run_mode"))
             }
+            if (runMode != "preparing_safe") FundingRequest.current = null
             val list = (0 until (dests?.length() ?: 0)).map { i ->
                 val d = dests!!.getJSONObject(i).let { it.optJSONObject("destination") ?: it }
                 Triple(d.optString("id"), d.optString("address"), d.optJSONObject("meta")?.toString() ?: "")
@@ -141,9 +142,10 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     private fun logFundingNeed(mode: JSONObject) {
         val rec = mode.optJSONObject("balance_recommendation")
         fun tokens(wei: String?) = wei?.toBigDecimalOrNull()?.movePointLeft(18)?.stripTrailingZeros()?.toPlainString() ?: "?"
-        LogBuffer.log("gnosis: FUNDING NEEDED for node ${mode.optString("node_address")}: " +
-            "${tokens(rec?.optString("wxhopr"))} wxHOPR + ${tokens(rec?.optString("xdai"))} xDAI " +
+        val need = "${tokens(rec?.optString("wxhopr"))} wxHOPR + ${tokens(rec?.optString("xdai"))} xDAI"
+        LogBuffer.log("gnosis: FUNDING NEEDED for node ${mode.optString("node_address")}: $need " +
             "(has ${tokens(mode.optString("node_wxhopr"))} wxHOPR, ${tokens(mode.optString("node_xdai"))} xDAI)")
+        FundingRequest.current = FundingRequest(mode.optString("node_address"), need)
     }
 
     private fun eventLoop() {
@@ -209,5 +211,12 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     companion object {
         /** The Gnosis backend is used when its settings file exists. */
         fun isConfigured(context: Context) = File(context.noBackupFilesDir, "gnosis.properties").exists()
+    }
+}
+
+/** What a new node waits for; shown on screen with a QR code of the address while it waits. */
+data class FundingRequest(val address: String, val need: String) {
+    companion object {
+        @Volatile var current: FundingRequest? = null
     }
 }

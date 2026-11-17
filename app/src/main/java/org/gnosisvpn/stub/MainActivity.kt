@@ -28,7 +28,7 @@ class MainActivity : Activity() {
     private val stateListener = Tunnel.Listener { state, _ -> render(state) }
     private val logListener: (String) -> Unit = { appendLog(it) }
     private val tick = object : Runnable {
-        override fun run() { renderStats(); ticker.postDelayed(this, 1000) }
+        override fun run() { renderStats(); renderFunding(); ticker.postDelayed(this, 1000) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,6 +76,10 @@ class MainActivity : Activity() {
         tunnel.addListener(stateListener)
         render(tunnel.state)
 
+        val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        intent.getStringExtra("preview_funding_address")?.takeIf { debuggable }?.let {
+            FundingRequest.current = FundingRequest(it, "preview only")
+        }
         if (savedInstanceState == null) {
             val pkg = packageManager.getPackageInfo(packageName, 0)
             LogBuffer.log("app ${pkg.versionName} on Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
@@ -204,6 +208,34 @@ class MainActivity : Activity() {
             val hs = s.lastHandshakeEpochMs?.let { "${(System.currentTimeMillis() - it) / 1000} s ago" } ?: "none yet"
             "rx ${kb(s.rxBytes)}  tx ${kb(s.txBytes)}  handshake $hs"
         }
+    }
+
+    private var shownFunding: FundingRequest? = null
+
+    /** QR code of the node address while a new node waits for funds (plain address: any wallet can scan it). */
+    private fun renderFunding() {
+        val request = FundingRequest.current
+        if (request == shownFunding) return
+        shownFunding = request
+        val box = findViewById<android.view.View>(R.id.fundingBox)
+        if (request == null) { box.visibility = android.view.View.GONE; return }
+        val qr = com.journeyapps.barcodescanner.BarcodeEncoder()
+            .encodeBitmap(request.address, com.google.zxing.BarcodeFormat.QR_CODE, 600, 600)
+        findViewById<android.widget.ImageView>(R.id.fundingQr).apply {
+            setImageBitmap(qr)
+            setOnClickListener { copyAddress(request.address) }
+        }
+        findViewById<TextView>(R.id.fundingText).apply {
+            text = "Fund this node on Gnosis Chain (tap to copy):\n${request.address}\nneeds ${request.need}"
+            setOnClickListener { copyAddress(request.address) }
+        }
+        box.visibility = android.view.View.VISIBLE
+    }
+
+    private fun copyAddress(address: String) {
+        getSystemService(android.content.ClipboardManager::class.java)
+            .setPrimaryClip(android.content.ClipData.newPlainText("node address", address))
+        LogBuffer.log("node address copied")
     }
 
     private fun kb(b: Long) = if (b < 1024 * 1024) "%.1f KB".format(b / 1024.0) else "%.2f MB".format(b / 1048576.0)
