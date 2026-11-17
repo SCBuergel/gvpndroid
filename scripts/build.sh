@@ -1,5 +1,7 @@
 #!/bin/sh
-# Build the debug APK with memory guards. Usage: scripts/build.sh [gradle tasks...]
+# Build, lint, unit-test and smoke-check the debug APK, with memory guards.
+# Usage: scripts/build.sh            (assembleDebug lintDebug testDebugUnitTest + scripts/check-apk.sh)
+#        scripts/build.sh TASK...    (only the given Gradle tasks)
 # Refuses to start if less than MIN_AVAIL_MB of memory is available (override: FORCE=1).
 set -eu
 cd "$(dirname "$0")/.."
@@ -21,7 +23,8 @@ if ! flock -n 9; then
     exit 3
 fi
 
-[ $# -gt 0 ] || set -- assembleDebug
+full=0
+[ $# -gt 0 ] || { set -- assembleDebug lintDebug testDebugUnitTest; full=1; }
 # Hard cap: if the build overshoots, the kernel kills the build, not other processes.
 CAP=${BUILD_MEMORY_MAX:-2300M}
 if systemd-run --user --scope --quiet -p MemoryMax=64M true 2>/dev/null; then
@@ -31,4 +34,6 @@ else
     echo "warning: systemd user scope unavailable, building without a hard memory cap" >&2
     ./gradlew --no-daemon --max-workers=1 "$@"
 fi
-ls -l app/build/outputs/apk/debug/*.apk 2>/dev/null || true
+if [ "$full" = 1 ]; then
+    scripts/check-apk.sh
+fi

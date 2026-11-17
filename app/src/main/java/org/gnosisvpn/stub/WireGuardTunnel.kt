@@ -13,12 +13,23 @@ import com.wireguard.android.backend.Tunnel as WgTunnel
  * Plain WireGuard backend using the official prebuilt wireguard-go library.
  * Will be replaced by a Gnosis VPN backend (WireGuard over a HOPR session).
  * Requires VpnService.prepare() to have been granted before connect().
+ *
+ * [onSystemStart] is called when Android starts the VpnService on its own (always-on VPN);
+ * the app should then bring the tunnel up through its usual path.
  */
-class WireGuardTunnel(context: Context, private val store: ConfigStore) : Tunnel {
+class WireGuardTunnel(
+    context: Context,
+    private val store: ConfigStore,
+    onSystemStart: () -> Unit,
+) : Tunnel {
     private val backend by lazy { GoBackend(context.applicationContext) }
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArrayList<Tunnel.Listener>()
+
+    init {
+        GoBackend.setAlwaysOnCallback { onSystemStart() }
+    }
 
     @Volatile
     override var state: Tunnel.State = Tunnel.State.DISCONNECTED

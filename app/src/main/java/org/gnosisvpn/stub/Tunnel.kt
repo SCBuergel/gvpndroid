@@ -2,8 +2,8 @@ package org.gnosisvpn.stub
 
 /**
  * The app's only view of the VPN. The UI talks to this interface and nothing else,
- * so the backend can be swapped: a fake one now, plain WireGuard next, and later
- * the Gnosis VPN client (WireGuard carried over a HOPR session).
+ * so the backend can be swapped: plain WireGuard ([WireGuardTunnel]) now, later the
+ * Gnosis VPN client (WireGuard carried over a HOPR session).
  */
 interface Tunnel {
     enum class State { DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING, ERROR }

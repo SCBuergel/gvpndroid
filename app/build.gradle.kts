@@ -24,6 +24,11 @@ android {
         }
     }
 
+    testOptions {
+        // The WireGuard config parser reads Build.VERSION; let android.jar stubs return defaults.
+        unitTests.isReturnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -40,4 +45,6 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // The scanner calls androidx.core (ContextCompat, ActivityCompat) at runtime but does not declare it.
     implementation("androidx.core:core:1.13.1")
+
+    testImplementation("junit:junit:4.13.2")
 }

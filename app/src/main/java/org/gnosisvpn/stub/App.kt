@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import com.wireguard.android.backend.GoBackend
 
 class App : Application() {
     lateinit var store: ConfigStore
@@ -19,18 +18,16 @@ class App : Application() {
         instance = this
         installCrashRecorder()
         store = ConfigStore(this)
-        tunnel = WireGuardTunnel(this, store)
+        tunnel = WireGuardTunnel(this, store, onSystemStart = {
+            // Android started the VPN by itself: "Always-on VPN" is enabled for this app.
+            LogBuffer.log("always-on VPN triggered by the system")
+            TunnelService.start(this, TunnelService.ACTION_CONNECT)
+        })
         tunnel.addListener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
 
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(TunnelService.CHANNEL, "VPN status", NotificationManager.IMPORTANCE_LOW)
         )
-
-        // Started by the system when the user enabled "Always-on VPN" for this app.
-        GoBackend.setAlwaysOnCallback {
-            LogBuffer.log("always-on VPN triggered by the system")
-            TunnelService.start(this, TunnelService.ACTION_CONNECT)
-        }
 
         LogBuffer.log("process started")
         reportPreviousCrash()

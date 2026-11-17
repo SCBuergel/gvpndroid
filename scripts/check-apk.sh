@@ -1,0 +1,34 @@
+#!/bin/sh
+# Smoke-check the built debug APK: native libs, 16 KB alignment, permissions, no secrets.
+# Usage: scripts/check-apk.sh [APK]
+set -eu
+cd "$(dirname "$0")/.."
+. "$HOME/android/env.sh"
+apk=${1:-app/build/outputs/apk/debug/app-debug.apk}
+bt="$ANDROID_HOME/build-tools/35.0.0"
+fail=0
+err() { echo "FAIL: $*" >&2; fail=1; }
+
+[ -s "$apk" ] || { echo "FAIL: no APK at $apk" >&2; exit 1; }
+listing=$(unzip -l "$apk")
+for abi in arm64-v8a armeabi-v7a; do
+    echo "$listing" | grep -q "lib/$abi/libwg-go.so" || err "lib/$abi/libwg-go.so missing"
+done
+echo "$listing" | grep -qE 'lib/(x86|x86_64)/' && err "x86 libraries present (abiFilters not applied)"
+echo "$listing" | grep -qiE '\.(conf|key)$' && err "a .conf or .key file is packaged"
+"$bt/zipalign" -c -P 16 4 "$apk" || err "not 16 KB zip-aligned"
+
+# Classes the QR scanner needs at runtime but does not declare (crashed 0.2.1 when missing).
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+unzip -q -o "$apk" 'classes*.dex' -d "$tmp"
+for c in androidx/core/content/ContextCompat androidx/core/app/ActivityCompat; do
+    grep -qa "L$c;" "$tmp"/classes*.dex || err "class $c missing from dex"
+done
+
+perms=$("$bt/aapt2" dump permissions "$apk")
+for p in INTERNET ACCESS_NETWORK_STATE FOREGROUND_SERVICE FOREGROUND_SERVICE_SPECIAL_USE POST_NOTIFICATIONS CAMERA; do
+    echo "$perms" | grep -q "android.permission.$p'" || err "permission $p missing"
+done
+
+[ "$fail" = 0 ] && echo "APK check ok: $apk ($(du -k "$apk" | cut -f1) KB, sha256 $(sha256sum "$apk" | cut -c1-16)...)"
+exit "$fail"

@@ -61,7 +61,7 @@ class MainActivity : Activity() {
             LogBuffer.log("app ${pkg.versionName} on Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}")
             val cfg = runCatching { app.store.load() }
             cfg.exceptionOrNull()?.let { LogBuffer.log("stored config unreadable: ${it.message}") }
-            LogBuffer.log(cfg.getOrNull()?.let { "config: ${app.store.describe(it)}" } ?: "no config yet: tap Import QR")
+            LogBuffer.log(cfg.getOrNull()?.let { "config: ${describeConfig(it)}" } ?: "no config yet: tap Import QR")
         }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -121,7 +121,7 @@ class MainActivity : Activity() {
             } else {
                 try {
                     val cfg = app.store.import(text)
-                    LogBuffer.log("config imported: ${app.store.describe(cfg)}")
+                    LogBuffer.log("config imported: ${describeConfig(cfg)}")
                     if (tunnel.state == Tunnel.State.CONNECTED) LogBuffer.log("disconnect and reconnect to use it")
                 } catch (e: Exception) {
                     LogBuffer.log("QR is not a valid WireGuard config: ${e.javaClass.simpleName}: ${e.message}")

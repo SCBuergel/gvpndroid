@@ -30,8 +30,8 @@ Keep peer configs outside the repo (here: `~/.config/gvpndroid-secrets/`, mode 6
 
 ## Build
 
-    scripts/build.sh            # assembleDebug
-    scripts/build.sh clean assembleDebug
+    scripts/build.sh            # assembleDebug, lint, unit tests, then scripts/check-apk.sh
+    scripts/build.sh assembleDebug   # only the given Gradle tasks
 
 The script refuses to start with less than 2200 MB of available memory or while
 another build holds the lock. It runs Gradle without a daemon, with one worker and a
@@ -49,7 +49,8 @@ Google's Advanced Protection Program, which blocks every app not from Google Pla
 switch off. The app is therefore tested in a separate Android user profile that has
 no Google account. That profile has no access to Claude sessions, so builds reach it
 through a short-lived public link (litterbox.catbox.moe, 1 hour expiry), typed into
-Chrome there:
+Chrome there. Before uploading, note the APK's `sha256sum`; download it back and
+compare, and compare again on the phone if it has a checksum tool:
 
     curl -F reqtype=fileupload -F time=1h -F fileToUpload=@app/build/outputs/apk/debug/app-debug.apk \
         https://litterbox.catbox.moe/resources/internals/api.php
