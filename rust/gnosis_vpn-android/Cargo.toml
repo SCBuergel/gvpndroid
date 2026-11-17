@@ -15,8 +15,12 @@ name       = "gnosisvpn"
 [dependencies]
 gnosis_vpn-ipc     = { path = "../gnosis_vpn-ipc" }
 gnosis_vpn-lib     = { path = "../gnosis_vpn-lib" }
+jni                = "0.22"
 jni-sys            = "0.4"
+# Android TLS: reqwest verifies certificates through Android's trust store via JNI.
+rustls-platform-verifier = "0.7"
 tokio.workspace    = true
 tracing.workspace  = true
-tracing-subscriber = { workspace = true, features = ["fmt"] }
+serde_json.workspace = true
+tracing-subscriber = { workspace = true, features = ["fmt", "env-filter"] }
 url.workspace      = true

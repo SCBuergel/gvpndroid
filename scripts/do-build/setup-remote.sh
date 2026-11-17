@@ -5,7 +5,7 @@ set -euo pipefail
 CLIENT_REV=${CLIENT_REV:?}            # gnosis_vpn-client commit to build
 NDK_VER=${NDK_VER:-r27c}
 NDK_SHA1=${NDK_SHA1:-090e8083a715fdb1a3e402d0763c388abb03fb4e}
-export DEBIAN_FRONTEND=noninteractive
+export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1  # skip needrestart service restarts
 t=$(date +%s); step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 
 # cloud-init may still hold the apt lock right after boot

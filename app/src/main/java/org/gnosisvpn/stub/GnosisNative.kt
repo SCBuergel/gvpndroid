@@ -2,7 +2,8 @@ package org.gnosisvpn.stub
 
 /**
  * The Gnosis VPN client core (Rust, `libgnosisvpn.so`, built from rust/gnosis_vpn-android).
- * Optional for now: builds without the library still work with the WireGuard backend.
+ * Optional: builds without the library still work with the WireGuard backend.
+ * See rust/gnosis_vpn-android/src/lib.rs for the protocol.
  */
 object GnosisNative {
     /** null when the library loaded, otherwise why not. */
@@ -12,6 +13,9 @@ object GnosisNative {
     } catch (e: Throwable) {
         "${e.javaClass.simpleName}: ${e.message}"
     }
+
+    /** Once per process before startCore: hands the TLS certificate verifier the JVM and a Context. */
+    @JvmStatic external fun initAndroid(context: android.content.Context)
 
     @JvmStatic external fun version(): String
 
@@ -26,4 +30,15 @@ object GnosisNative {
         blokliUrl: String,
         network: String,
     ): String?
+
+    /** Sends a WorkerCommand as JSON and returns the core's Response as JSON. Blocks; not on the main thread. */
+    @JvmStatic external fun command(json: String): String
+
+    /** The next core event as JSON (setup_tunnel, teardown, core_started, core_error, ...), or null. */
+    @JvmStatic external fun pollEvent(): String?
+
+    /** Answers a setup_tunnel event with the tun fd (or -1 on failure); null on success, else the error. */
+    @JvmStatic external fun tunReady(requestId: Long, fd: Int): String?
+
+    @JvmStatic external fun stopCore()
 }

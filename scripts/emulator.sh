@@ -36,6 +36,13 @@ load_modules() {
     sudo modprobe -a $mods || echo "warning: some netfilter modules did not load" >&2
 }
 
+quiet_lmkd() {
+    # redroid's lmkd fails epoll_wait in a container and logs the error in a tight loop
+    # (thousands of lines per second), evicting every other line from logcat. Stop it.
+    # Via docker exec, not `adb root`: a root adbd's traffic would be routed into the app's VPN.
+    docker exec "$NAME" sh -c 'setprop ctl.stop lmkd' >/dev/null 2>&1 || true
+}
+
 prepare_tun() {
     # Android's VpnService opens /dev/tun (ueventd creates it on a phone); redroid has only
     # /dev/net/tun. /dev is per container start, so recreate it each time.
@@ -89,6 +96,7 @@ start() {
         echo "booted in $(( $(date +%s) - t0 )) s"
     fi
     prepare_tun
+    quiet_lmkd
     adb_connect
 }
 

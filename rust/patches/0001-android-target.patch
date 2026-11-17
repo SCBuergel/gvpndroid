@@ -1,18 +1,21 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 1d42f488..f12dc330 100644
+index b6351f1c..92ce003d 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -4426,6 +4426,19 @@ dependencies = [
+@@ -4426,6 +4426,22 @@ dependencies = [
   "wasm-bindgen",
  ]
  
 +[[package]]
 +name = "gnosis_vpn-android"
-+version = "1.0.0-rc.2"
++version = "1.0.0"
 +dependencies = [
 + "gnosis_vpn-ipc",
 + "gnosis_vpn-lib",
++ "jni",
 + "jni-sys",
++ "rustls-platform-verifier",
++ "serde_json",
 + "tokio",
 + "tracing",
 + "tracing-subscriber",
@@ -21,7 +24,7 @@ index 1d42f488..f12dc330 100644
 +
  [[package]]
  name = "gnosis_vpn-ctl"
- version = "1.0.0-rc.2"
+ version = "1.0.0"
 diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
 index 07469a31..84217fe6 100644
 --- a/gnosis_vpn-ipc/src/dirs.rs
@@ -97,7 +100,7 @@ index 4238698a..96b33559 100644
  #[cfg(target_os = "macos")]
  pub const DEFAULT_DB_PATH: &str = "/usr/local/share/gnosisvpn/geoip.mmdb";
 diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
-index 89e1c949..0b1c1656 100644
+index ec444bdb..eb9c4e08 100644
 --- a/gnosis_vpn-lib/src/hopr/pix_config.rs
 +++ b/gnosis_vpn-lib/src/hopr/pix_config.rs
 @@ -7,7 +7,7 @@ use serde_with::{DisplayFromStr, serde_as};

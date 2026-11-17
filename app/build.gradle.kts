@@ -48,6 +48,8 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     // The scanner calls androidx.core (ContextCompat, ActivityCompat) at runtime but does not declare it.
     implementation("androidx.core:core:1.13.1")
+    // Must equal the rustls-platform-verifier-android version in the Rust core's Cargo.lock.
+    implementation("org.rustls:rustls-platform-verifier:0.2.0")
 
     testImplementation("junit:junit:4.13.2")
 }

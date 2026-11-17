@@ -12,13 +12,17 @@ class App : Application() {
         private set
     lateinit var tunnel: Tunnel
         private set
+    /** Gnosis VPN backend (when gnosis.properties exists) instead of plain WireGuard. */
+    var usesGnosis = false
+        private set
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         installCrashRecorder()
         store = ConfigStore(this)
-        tunnel = WireGuardTunnel(this, store, onSystemStart = {
+        usesGnosis = GnosisTunnel.isConfigured(this)
+        tunnel = if (usesGnosis) GnosisTunnel(this) else WireGuardTunnel(this, store, onSystemStart = {
             // Android started the VPN by itself: "Always-on VPN" is enabled for this app.
             LogBuffer.log("always-on VPN triggered by the system")
             TunnelService.start(this, TunnelService.ACTION_CONNECT)
@@ -29,7 +33,7 @@ class App : Application() {
             NotificationChannel(TunnelService.CHANNEL, "VPN status", NotificationManager.IMPORTANCE_LOW)
         )
 
-        LogBuffer.log("process started")
+        LogBuffer.log("process started, backend: ${if (usesGnosis) "gnosis" else "wireguard"}")
         GnosisNative.loadError?.let { LogBuffer.log("gnosis core not available: $it") }
             ?: LogBuffer.log("gnosis core: ${GnosisNative.version()}, config check: ${GnosisNative.checkConfig("") ?: "ok"}")
         reportPreviousCrash()

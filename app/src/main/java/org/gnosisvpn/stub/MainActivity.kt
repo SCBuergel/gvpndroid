@@ -80,7 +80,7 @@ class MainActivity : Activity() {
     }
 
     private fun requestConnect() {
-        if (runCatching { app.store.load() }.getOrNull() == null) {
+        if (!app.usesGnosis && runCatching { app.store.load() }.getOrNull() == null) {
             LogBuffer.log("no usable config: tap Import QR first")
             return
         }
