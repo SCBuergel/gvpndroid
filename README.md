@@ -20,6 +20,8 @@ can later be swapped for the Gnosis VPN client. No Rust, no HOPR, no NDK.
 - `scripts/build.sh`: memory-guarded build, lint and unit tests, then `scripts/check-apk.sh`
   (native libs, 16 KB alignment, permissions, required classes, no packaged secrets).
 - `scripts/show-config-qr.sh`: shows a config as a QR code on screen.
+- `scripts/emulator.sh`, `scripts/e2e-emulator.sh`: local Android in Docker (redroid) and an
+  end-to-end VPN test against it; see "Test without a phone".
 
 ## Config
 
@@ -44,6 +46,54 @@ overshoot kills the build and not other processes. The first build peaked at abo
 1.7 GB of resident memory.
 
 Output: `app/build/outputs/apk/debug/app-debug.apk` (package `org.gnosisvpn.stub.debug`).
+The debug APK carries wireguard-go for arm64-v8a, armeabi-v7a and x86_64, so the same file
+runs on a phone and in redroid; release builds are ARM only. `check-apk.sh` requires those
+three and rejects 32-bit x86.
+
+## Test without a phone (redroid)
+
+This qube has no KVM, so the Android emulator cannot run. Instead, redroid runs Android 14
+(x86_64) as a Docker container on the host kernel, using its binder and tun, and adb reaches
+it at `localhost:5555`.
+
+    scripts/emulator.sh start     # start or create the container, wait for boot, adb connect
+    scripts/emulator.sh status    # state, memory use, adb
+    scripts/emulator.sh stop      # stop it; image and data stay
+    scripts/e2e-emulator.sh ~/.config/gvpndroid-secrets/gvpndroid-emu.conf
+
+The e2e script installs the debug APK, grants the notification permission and VPN
+consent without UI (`pm grant`, `appops set ... ACTIVATE_VPN allow`), copies the config into
+the app's `no_backup/tunnel.conf` with `run-as` (no camera, no QR scan), then taps through the
+UI with `uiautomator dump` and `input tap`. It checks, printing PASS/FAIL per step: connected
+status and a handshake in the app's stats, a VPN network in `dumpsys connectivity`, the
+default route via tun0, the public IP from inside Android (`nc` to ifconfig.me), and that the
+HTTP reply arrived through tun0; then process death (the system restarts the service and the
+tunnel), the notification's Disconnect action, and that after Disconnect the route and IP
+return to the pre-connect state. It stops the container at the end (`KEEP=1` keeps it).
+`EXPECT_IP` overrides the expected tunnel IP (default: the config's Endpoint host).
+
+Use a router peer reserved for the container, never the phone's: one key in two places
+breaks both. On this LAN the qube already exits through the router's public IP, so the
+before/after IP is the same; the tun0 route and byte counters are what prove the tunnel.
+
+Details a later session needs:
+
+- Image `redroid/redroid:14.0.0-latest` (about 870 MB download, 2.1 GB on disk). Docker's
+  data-root here is `/home/user/.build-host/docker`, so the image survives reboots.
+  Android's `/data` is `~/android/redroid-data`.
+- Boot takes about 15 to 25 s; the container uses about 700 to 760 MB and is capped at 2 GB.
+  `emulator.sh start` wants 1500 MB available (`FORCE=1` overrides).
+- redroid mounts binderfs itself; the container runs `--privileged`.
+- Android's VpnService opens `/dev/tun`, which redroid lacks (only `/dev/net/tun`), so
+  `establish()` fails with "Cannot create interface" until the node exists.
+  `emulator.sh start` creates it on every start.
+- netd needs the legacy iptables tables and xt modules. Without them it cannot mark
+  incoming packets, the VPN captures adbd's replies, and adb goes offline as soon as the
+  tunnel is up. `emulator.sh start` loads the modules with `sudo modprobe`; they are lost
+  on reboot, so start the container through the script. `quota2` (Android-only) stays
+  missing, which affects only data-usage alerts.
+- The VPN consent from `appops` did not survive a container restart; the e2e script sets
+  it on every run.
 
 ## Install on a phone
 
