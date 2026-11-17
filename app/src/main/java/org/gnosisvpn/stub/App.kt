@@ -30,6 +30,8 @@ class App : Application() {
         )
 
         LogBuffer.log("process started")
+        GnosisNative.loadError?.let { LogBuffer.log("gnosis core not available: $it") }
+            ?: LogBuffer.log("gnosis core: ${GnosisNative.version()}, config check: ${GnosisNative.checkConfig("") ?: "ok"}")
         reportPreviousCrash()
         try {
             watchNetwork()

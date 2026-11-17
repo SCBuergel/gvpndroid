@@ -1,0 +1,227 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 1d42f488..f12dc330 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4426,6 +4426,19 @@ dependencies = [
+  "wasm-bindgen",
+ ]
+ 
++[[package]]
++name = "gnosis_vpn-android"
++version = "1.0.0-rc.2"
++dependencies = [
++ "gnosis_vpn-ipc",
++ "gnosis_vpn-lib",
++ "jni-sys",
++ "tokio",
++ "tracing",
++ "tracing-subscriber",
++ "url",
++]
++
+ [[package]]
+ name = "gnosis_vpn-ctl"
+ version = "1.0.0-rc.2"
+diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
+index 07469a31..84217fe6 100644
+--- a/gnosis_vpn-ipc/src/dirs.rs
++++ b/gnosis_vpn-ipc/src/dirs.rs
+@@ -12,7 +12,7 @@ pub struct UserDirs {
+ }
+ 
+ /// Pure function of home and platform; root never creates or chowns these dirs (symlink chown = root hole).
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub fn user_dirs(home: &Path) -> UserDirs {
+     UserDirs {
+         data: home.join(".local/share/gnosisvpn"),
+diff --git a/gnosis_vpn-ipc/src/socket.rs b/gnosis_vpn-ipc/src/socket.rs
+index 86d42480..b98cf8f4 100644
+--- a/gnosis_vpn-ipc/src/socket.rs
++++ b/gnosis_vpn-ipc/src/socket.rs
+@@ -7,7 +7,7 @@ use std::time::Duration;
+ use crate::protocol::*;
+ use crate::values::{DestinationId, FundingSecret};
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub const DEFAULT_PATH: &str = "/run/gnosisvpn/gnosisvpn.sock";
+ /// macOS keeps the flat `/var/run` name next to the pid file newsyslog reads.
+ #[cfg(target_os = "macos")]
+diff --git a/gnosis_vpn-lib/src/app_nap.rs b/gnosis_vpn-lib/src/app_nap.rs
+index a8f5221e..7b0b1085 100644
+--- a/gnosis_vpn-lib/src/app_nap.rs
++++ b/gnosis_vpn-lib/src/app_nap.rs
+@@ -36,7 +36,7 @@ mod macos {
+     }
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(not(target_os = "macos"))]
+ mod noop {
+     /// No-op token on non-macOS platforms.
+     pub struct ActivityToken;
+@@ -48,7 +48,7 @@ mod noop {
+ 
+ #[cfg(target_os = "macos")]
+ pub use macos::{ActivityToken, disable};
+-#[cfg(target_os = "linux")]
++#[cfg(not(target_os = "macos"))]
+ pub use noop::{ActivityToken, disable};
+ 
+ #[cfg(test)]
+diff --git a/gnosis_vpn-lib/src/dirs.rs b/gnosis_vpn-lib/src/dirs.rs
+index d13c9dfb..4f550d7e 100644
+--- a/gnosis_vpn-lib/src/dirs.rs
++++ b/gnosis_vpn-lib/src/dirs.rs
+@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
+ pub use gnosis_vpn_ipc::dirs::{UserDirs, user_dirs};
+ 
+ /// Root's runtime files (socket, lock, crash-recovery state): `/run` per FHS 3.0, `/var/run` on macOS which has no `/run`.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub const RUNTIME_DIR: &str = "/run/gnosisvpn";
+ #[cfg(target_os = "macos")]
+ pub const RUNTIME_DIR: &str = "/var/run/gnosisvpn";
+diff --git a/gnosis_vpn-lib/src/geoip.rs b/gnosis_vpn-lib/src/geoip.rs
+index 4238698a..96b33559 100644
+--- a/gnosis_vpn-lib/src/geoip.rs
++++ b/gnosis_vpn-lib/src/geoip.rs
+@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr};
+ use std::path::{Path, PathBuf};
+ 
+ /// Where the installer puts the database; only a v7 config can point elsewhere.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub const DEFAULT_DB_PATH: &str = "/usr/share/gnosisvpn/geoip.mmdb";
+ #[cfg(target_os = "macos")]
+ pub const DEFAULT_DB_PATH: &str = "/usr/local/share/gnosisvpn/geoip.mmdb";
+diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
+index 89e1c949..0b1c1656 100644
+--- a/gnosis_vpn-lib/src/hopr/pix_config.rs
++++ b/gnosis_vpn-lib/src/hopr/pix_config.rs
+@@ -7,7 +7,7 @@ use serde_with::{DisplayFromStr, serde_as};
+ use url::Url;
+ 
+ /// Where the installer puts the Curvy proving files; only a v7 config can point elsewhere.
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub const DEFAULT_CURVY_ZK_DIR: &str = "/usr/share/gnosisvpn/curvy-zk";
+ #[cfg(target_os = "macos")]
+ pub const DEFAULT_CURVY_ZK_DIR: &str = "/usr/local/share/gnosisvpn/curvy-zk";
+diff --git a/gnosis_vpn-lib/src/killswitch/android.rs b/gnosis_vpn-lib/src/killswitch/android.rs
+new file mode 100644
+index 00000000..1c830ca9
+--- /dev/null
++++ b/gnosis_vpn-lib/src/killswitch/android.rs
+@@ -0,0 +1,40 @@
++//! Android has no app-controlled firewall. The kill switch is the system setting
++//! "Always-on VPN" + "Block connections without VPN", so every policy call is a no-op.
++
++use std::net::IpAddr;
++
++use thiserror::Error;
++
++#[derive(Debug, Error)]
++pub enum Error {
++    #[error("{0}")]
++    Unsupported(String),
++}
++
++pub struct Firewall;
++
++impl Firewall {
++    pub fn new() -> Result<Self, Error> {
++        Ok(Firewall)
++    }
++
++    pub fn capture_recovery_state(&mut self) -> Result<Option<bool>, Error> {
++        Ok(None)
++    }
++
++    pub fn apply_policy(&mut self, _interface: Option<&str>, _allowed_ips: &[IpAddr], _lan_lockdown: bool) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn reapply_policy(&mut self, _interface: Option<&str>, _allowed_ips: &[IpAddr], _lan_lockdown: bool) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn reset_policy(&mut self) -> Result<(), Error> {
++        Ok(())
++    }
++
++    pub fn reset_policy_with_state(&mut self, _was_enabled: Option<bool>) -> Result<(), Error> {
++        Ok(())
++    }
++}
+diff --git a/gnosis_vpn-lib/src/killswitch/mod.rs b/gnosis_vpn-lib/src/killswitch/mod.rs
+index 9cf29b2b..f6ec71d1 100644
+--- a/gnosis_vpn-lib/src/killswitch/mod.rs
++++ b/gnosis_vpn-lib/src/killswitch/mod.rs
+@@ -34,5 +34,8 @@ cfg_if::cfg_if! {
+     } else if #[cfg(target_os = "macos")] {
+         mod macos;
+         pub use macos::{Error, Firewall};
++    } else if #[cfg(target_os = "android")] {
++        mod android;
++        pub use android::{Error, Firewall};
+     }
+ }
+diff --git a/gnosis_vpn-lib/src/ping.rs b/gnosis_vpn-lib/src/ping.rs
+index 4fcd7274..88488f6c 100644
+--- a/gnosis_vpn-lib/src/ping.rs
++++ b/gnosis_vpn-lib/src/ping.rs
+@@ -56,7 +56,7 @@ async fn ping_using_cmd(opts: &Options) -> Result<Duration, Error> {
+     let mut cmd = Command::new("ping");
+     cmd.arg("-c").arg(opts.seq_count.to_string());
+     cfg_if::cfg_if! {
+-        if #[cfg(target_os = "linux")] {
++        if #[cfg(any(target_os = "linux", target_os = "android"))] {
+             cmd.arg("-W").arg(opts.timeout.as_secs().to_string());
+             cmd.arg("-t").arg(opts.ttl.to_string());
+         } else if #[cfg(target_os = "macos")] {
+@@ -74,6 +74,8 @@ async fn ping_using_ping_crate(opts: &Options) -> Result<Duration, Error> {
+     cfg_if::cfg_if! {
+         if #[cfg(target_os = "linux")] {
+             let socket_type = ping::SocketType::RAW;
++        } else if #[cfg(target_os = "android")] {
++            let socket_type = ping::SocketType::DGRAM;
+         } else if #[cfg(target_os = "macos")] {
+             let socket_type = ping::SocketType::DGRAM;
+         }
+diff --git a/gnosis_vpn-lib/src/socket/fd_passing.rs b/gnosis_vpn-lib/src/socket/fd_passing.rs
+index 07e900c0..750b382c 100644
+--- a/gnosis_vpn-lib/src/socket/fd_passing.rs
++++ b/gnosis_vpn-lib/src/socket/fd_passing.rs
+@@ -185,7 +185,7 @@ fn socket_type_name(socket_type: rustix::net::SocketType) -> &'static str {
+     }
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn recv_flags() -> RecvFlags {
+     RecvFlags::CMSG_CLOEXEC
+ }
+@@ -194,7 +194,7 @@ fn recv_flags() -> RecvFlags {
+     RecvFlags::empty()
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn ensure_cloexec(_fd: &OwnedFd) -> io::Result<()> {
+     Ok(()) // already atomic via MSG_CMSG_CLOEXEC
+ }
+diff --git a/gnosis_vpn-lib/src/wg_tunnel/tun.rs b/gnosis_vpn-lib/src/wg_tunnel/tun.rs
+index 08a137d2..255b4ab6 100644
+--- a/gnosis_vpn-lib/src/wg_tunnel/tun.rs
++++ b/gnosis_vpn-lib/src/wg_tunnel/tun.rs
+@@ -29,7 +29,7 @@ use super::{TunReceiver, TunSender};
+ /// macOS (`utun` address-family prefix).
+ #[cfg(target_os = "macos")]
+ pub const PLATFORM_TUN_HEADER_LEN: usize = 4;
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ pub const PLATFORM_TUN_HEADER_LEN: usize = 0;
+ 
+ /// BSD `AF_INET` (2) as a 4-byte big-endian `utun` header.

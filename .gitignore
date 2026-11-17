@@ -17,3 +17,9 @@ local.properties
 # Session files
 .session-brief.md
 .start-session.sh
+
+# Locally built Rust core (rust/), copied in by scripts/do-build; never committed
+app/src/main/jniLibs/
+
+# Agent worktrees
+.claude/
