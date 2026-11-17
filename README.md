@@ -1,14 +1,26 @@
 # gvpndroid
 
-Stub Android app for Gnosis VPN. Milestone 1: build pipeline and a fake tunnel.
-No Rust, no HOPR, no NDK.
+Stub Android app for Gnosis VPN: a plain WireGuard VPN built with the official
+prebuilt WireGuard tunnel library, behind a small `Tunnel` interface so the backend
+can later be swapped for the Gnosis VPN client. No Rust, no HOPR, no NDK.
 
 ## Layout
 
 - `app/src/main/java/org/gnosisvpn/stub/Tunnel.kt`: the interface the UI uses
   (connect, disconnect, state, stats). Backends implement it.
-- `FakeTunnel.kt`: milestone 1 backend, moves no traffic.
-- `MainActivity.kt`: one screen with a button, a status line and a log.
+- `WireGuardTunnel.kt`: backend using `com.wireguard.android:tunnel` (GoBackend, prebuilt wireguard-go).
+- `TunnelService.kt`: foreground service with notification and Disconnect action; restarts
+  the tunnel after process death; the always-on callback starts it too.
+- `ConfigStore.kt`: the WireGuard config, imported on the phone by QR scan into
+  app-private storage. Configs and keys are never in the APK or the repo.
+- `App.kt`, `LogBuffer.kt`: logging of state, network changes, kill switch state, and the
+  last crash (shown on the next start, since there is no logcat without adb).
+- `MainActivity.kt`: Connect/Disconnect, Import QR, VPN settings, status, stats, log.
+
+## Config
+
+Keep peer configs outside the repo (here: `~/.config/gvpndroid-secrets/`, mode 600).
+`scripts/show-config-qr.sh PEER.conf` shows one as a QR code on screen for the app to scan.
 
 ## Toolchain (outside the repo, under `~/android`, survives qube reboots)
 
