@@ -32,6 +32,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     private val listeners = CopyOnWriteArrayList<Tunnel.Listener>()
     private val loopsStarted = java.util.concurrent.atomic.AtomicBoolean(false)
     @Volatile private var coreRunning = false
+    /** Generation of the core this instance started; older cores' lifecycle events are ignored. */
+    @Volatile private var coreGeneration = -1L
     @Volatile private var tun: ParcelFileDescriptor? = null
     @Volatile private var tunParams: String? = null
     @Volatile private var wantConnected = false
@@ -172,6 +174,9 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         // A core stopped moments ago may still be shutting down: retry for a while.
         var waited = 0
         while (true) {
+            // Set before starting, so even an immediate core_error of the new core is matched.
+            // Only this (synchronized) method starts cores, and a refused start uses no number.
+            coreGeneration = GnosisNative.coreGeneration() + 1
             val err = GnosisNative.startCore(data.path, cache.path, config, blokli, network) ?: break
             if (err != "core already running" || waited >= 20_000) error("startCore: $err")
             Thread.sleep(1_000)
@@ -252,8 +257,13 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                     // The tun is kept across the core's reconnects; it is closed on disconnect.
                     if (state == Tunnel.State.CONNECTED) set(Tunnel.State.CONNECTING, "core is reconnecting")
                 }
-                "core_error" -> { coreRunning = false; set(Tunnel.State.ERROR, event.optString("error")) }
-                "core_stopped" -> { coreRunning = false }
+                // A late event of an earlier core (after a quick stop and restart) must not
+                // mark the current one as stopped.
+                "core_error" -> if (event.optLong("generation", -2) == coreGeneration) {
+                    coreRunning = false
+                    set(Tunnel.State.ERROR, event.optString("error"))
+                }
+                "core_stopped" -> if (event.optLong("generation", -2) == coreGeneration) coreRunning = false
             }
         }
     }

@@ -20,7 +20,7 @@ use std::os::fd::BorrowedFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -45,8 +45,11 @@ static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
 static TUN_SOCKET: OnceLock<UnixStream> = OnceLock::new();
 /// Set while a core is starting or running; guards against a second core in the process.
 static STARTED: AtomicBool = AtomicBool::new(false);
-/// Set by `stopCore`; a core whose init is still running is dropped instead of started.
+/// Set by `stopCore`; a core whose init is still running is shut down instead of serving.
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+/// Counts core starts. Lifecycle events carry it, so the app can ignore a late `core_stopped`
+/// or `core_error` of an earlier core after a new one has started.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
 /// Events for Kotlin, as JSON lines, drained by `pollEvent`.
 static EVENTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
@@ -206,6 +209,13 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReady(
     }
 }
 
+/// `GnosisNative.coreGeneration(): Long` — the generation of the most recently started core
+/// (lifecycle events carry it), read right after a successful `startCore`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_coreGeneration(_env: *mut JNIEnv, _class: jclass) -> jlong {
+    GENERATION.load(Ordering::SeqCst) as jlong
+}
+
 /// `GnosisNative.stopCore()` — asks the core to shut down.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_stopCore(_env: *mut JNIEnv, _class: jclass) {
@@ -261,7 +271,8 @@ fn start_core(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: 
         return Err("core already running".into());
     }
     STOP_REQUESTED.store(false, Ordering::SeqCst);
-    let result = prepare_and_spawn(data, cache, toml, blokli, network);
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
+    let result = prepare_and_spawn(data, cache, toml, blokli, network, generation);
     if result.is_err() {
         STARTED.store(false, Ordering::SeqCst);
     }
@@ -283,7 +294,14 @@ fn set_env_before_runtime(name: &str, value: &std::ffi::OsStr) -> Result<(), Str
     Ok(())
 }
 
-fn prepare_and_spawn(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: String) -> Result<(), String> {
+fn prepare_and_spawn(
+    data: PathBuf,
+    cache: PathBuf,
+    toml: &str,
+    blokli: &str,
+    network: String,
+    generation: u64,
+) -> Result<(), String> {
     // Android's default temp dir (/data/local/tmp) is not writable by apps.
     set_env_before_runtime("TMPDIR", cache.as_os_str())?;
     let config = gnosis_vpn_lib::config::parse(toml).map_err(|e| format!("config: {e}"))?;
@@ -318,30 +336,30 @@ fn prepare_and_spawn(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, ne
         match Core::init(config, params, None, sender).await {
             Ok((core, to_core)) => {
                 *TO_CORE.lock().unwrap() = Some(to_core);
-                // Stopped while init ran (stopCore found no sender yet): never start this core.
+                // Stopped while init ran (stopCore found no sender yet): queue Shutdown so the
+                // core runs its own teardown (tasks started during init) instead of serving.
                 if STOP_REQUESTED.load(Ordering::SeqCst) {
-                    TO_CORE.lock().unwrap().take();
-                    drop(core);
-                    STARTED.store(false, Ordering::SeqCst);
-                    tracing::info!("core stopped before it started");
-                    push_event(json!({ "type": "core_stopped" }));
-                    return;
+                    if let Some(sender) = TO_CORE.lock().unwrap().take() {
+                        let _ = sender.try_send(WorkerToCore::Shutdown);
+                    }
+                    tracing::info!("core stopped while starting; shutting it down");
                 }
                 tokio::spawn(async move {
                     while let Some(CoreToWorker::RequestToRoot(request)) = from_core.recv().await {
                         handle_request(request);
                     }
                 });
-                push_event(json!({ "type": "core_started" }));
+                push_event(json!({ "type": "core_started", "generation": generation }));
                 core.start().await;
                 TO_CORE.lock().unwrap().take();
+                // Event before releasing STARTED, and tagged: a new core can only start after it.
+                push_event(json!({ "type": "core_stopped", "generation": generation }));
                 STARTED.store(false, Ordering::SeqCst);
-                push_event(json!({ "type": "core_stopped" }));
             }
             Err(e) => {
                 tracing::error!(error = %e, "core init failed");
+                push_event(json!({ "type": "core_error", "error": e.to_string(), "generation": generation }));
                 STARTED.store(false, Ordering::SeqCst);
-                push_event(json!({ "type": "core_error", "error": e.to_string() }));
             }
         }
     });

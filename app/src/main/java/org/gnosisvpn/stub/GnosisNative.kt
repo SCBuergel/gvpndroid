@@ -42,6 +42,9 @@ object GnosisNative {
 
     @JvmStatic external fun stopCore()
 
+    /** Generation of the most recently started core; lifecycle events carry it. */
+    @JvmStatic external fun coreGeneration(): Long
+
     /** Changes the core's log filter (EnvFilter syntax) at runtime; null on success. */
     @JvmStatic external fun setLogFilter(filter: String): String?
 
