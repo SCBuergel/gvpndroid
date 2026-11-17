@@ -172,8 +172,8 @@ In the app: "Use Gnosis VPN", then Connect. Disconnect before installing an upda
     ABIS=arm64-v8a scripts/do-build/run.sh       # phone only
     KEEP=1 scripts/do-build/run.sh               # keep the droplet: rebuild.sh, then down.sh
 
-The crate's contract tests (`cargo test -p gnosis_vpn-android`) run on the droplet, on the host
-target. Rebuild after every change under `rust/`: the libraries in `jniLibs/` are not tracked.
+Every build first runs the crate's contract tests (`cargo test -p gnosis_vpn-android`, host
+target, part of `build-remote.sh`; `TESTS=0` skips them); a failing test stops the build. Rebuild after every change under `rust/`: the libraries in `jniLibs/` are not tracked.
 
 It rents a DigitalOcean c-32 droplet, builds, copies the libraries into
 `app/src/main/jniLibs/` (gitignored), and deletes the droplet on every exit path, with a 6 h

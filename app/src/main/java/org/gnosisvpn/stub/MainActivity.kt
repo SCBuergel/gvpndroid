@@ -50,7 +50,7 @@ class MainActivity : Activity() {
         val backend = findViewById<Button>(R.id.backendButton)
         backend.text = if (app.usesGnosis) "Use WireGuard" else "Use Gnosis VPN"
         // Gnosis needs both the bundled data files and the Rust core library in this APK.
-        backend.isEnabled = app.usesGnosis || (GnosisSetup.bundled(this) && GnosisNative.loadError == null)
+        backend.isEnabled = app.usesGnosis || app.canUseGnosis()
         backend.setOnClickListener { switchBackend() }
         findViewById<android.view.View>(R.id.gnosisRow).visibility =
             if (app.usesGnosis) android.view.View.VISIBLE else android.view.View.GONE
@@ -68,7 +68,7 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.exportButton).apply {
             isEnabled = app.usesGnosis
             setOnClickListener {
-                if (!GnosisSetup.hasIdentity(this@MainActivity)) {
+                if (!app.hasNodeIdentity()) {
                     LogBuffer.log("no identity yet: connect once so the core creates it")
                 } else {
                     startActivityForResult(
@@ -167,7 +167,7 @@ class MainActivity : Activity() {
         LogBuffer.log(if (toGnosis) "setting up Gnosis VPN (copying 46 MB of data files)..." else "switching to WireGuard (the Gnosis identity is kept)")
         Thread {
             try {
-                if (toGnosis) GnosisSetup.enable(this) else GnosisSetup.disable(this)
+                app.switchBackend(toGnosis)
                 runOnUiThread {
                     app.selectBackend()
                     LogBuffer.log("backend: ${if (app.usesGnosis) "gnosis" else "wireguard"}")
@@ -203,7 +203,7 @@ class MainActivity : Activity() {
             val uri = data?.data
             if (resultCode == RESULT_OK && uri != null) {
                 try {
-                    GnosisSetup.exportIdentity(this, uri)
+                    app.exportNodeIdentity(uri)
                     LogBuffer.log("identity exported: keep that file safe, it controls the node's funds")
                 } catch (e: Exception) {
                     LogBuffer.log("export failed: ${e.javaClass.simpleName}: ${e.message}")

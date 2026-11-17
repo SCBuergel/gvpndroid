@@ -26,6 +26,9 @@ class GnosisVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Also here, not only in onCreate: a start can reach an instance that outlived stop()
+        // (the system may still be bound to it), and obtain() waits for exactly this.
+        if (running.getNow(null) == null) running.complete(this)
         // The system starts a VpnService with the SERVICE_INTERFACE action for Always-on VPN
         // (also after boot); the app's own starts carry no action.
         if (intent?.action == SERVICE_INTERFACE) {

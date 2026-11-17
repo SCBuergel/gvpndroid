@@ -82,6 +82,24 @@ class App : Application() {
 
     private val stateLogger = Tunnel.Listener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
 
+    /** Whether this APK can run the Gnosis backend: bundled data files and the Rust core library. */
+    fun canUseGnosis() = GnosisSetup.bundled(this) && GnosisNative.loadError == null
+
+    /**
+     * Switches between the WireGuard and Gnosis backends. Copies 46 MB of data files when turning
+     * Gnosis on: call off the main thread. Throws if the switch cannot be done; the caller then
+     * still has the old backend. Turning Gnosis off keeps its node identity.
+     */
+    fun switchBackend(toGnosis: Boolean) {
+        if (toGnosis) GnosisSetup.enable(this) else GnosisSetup.disable(this)
+    }
+
+    /** Whether the Gnosis core has created a node identity (which then controls the node's funds). */
+    fun hasNodeIdentity() = GnosisSetup.hasIdentity(this)
+
+    /** Writes the node identity (key file + password) to a document the user picked. */
+    fun exportNodeIdentity(target: android.net.Uri) = GnosisSetup.exportIdentity(this, target)
+
     /** One per process: the Rust core and its event queue exist once. */
     private val gnosisTunnel by lazy { GnosisTunnel(this) }
 

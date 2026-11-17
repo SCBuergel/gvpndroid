@@ -116,8 +116,10 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     override fun shutdown() {
         wantConnected = false
+        val wasConnected = state != Tunnel.State.DISCONNECTED
         worker.execute {
-            disconnectCore()
+            // Only when connected: a core still starting answers commands slowly (up to 60 s).
+            if (wasConnected) disconnectCore()
             closeTun(stopService = true)
             if (coreRunning) {
                 GnosisNative.stopCore()
@@ -165,11 +167,16 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         LogBuffer.log("gnosis: starting core (${GnosisNative.version()}), log level ${level.name.lowercase()}")
         GnosisNative.initAndroid(context.applicationContext)
         GnosisNative.setLogFilter(level.coreFilter)
-        GnosisNative.startCore(
-            data.path, cache.path, config,
-            props.getProperty("blokli_url") ?: error("gnosis.properties has no blokli_url"),
-            props.getProperty("network") ?: error("gnosis.properties has no network"),
-        )?.let { error("startCore: $it") }
+        val blokli = props.getProperty("blokli_url") ?: error("gnosis.properties has no blokli_url")
+        val network = props.getProperty("network") ?: error("gnosis.properties has no network")
+        // A core stopped moments ago may still be shutting down: retry for a while.
+        var waited = 0
+        while (true) {
+            val err = GnosisNative.startCore(data.path, cache.path, config, blokli, network) ?: break
+            if (err != "core already running" || waited >= 20_000) error("startCore: $err")
+            Thread.sleep(1_000)
+            waited += 1_000
+        }
         coreRunning = true
         // The loops live as long as the process (the instance is a per-process singleton) and
         // idle while the core is stopped, so restarts never duplicate them.

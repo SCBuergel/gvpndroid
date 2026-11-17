@@ -45,6 +45,8 @@ static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
 static TUN_SOCKET: OnceLock<UnixStream> = OnceLock::new();
 /// Set while a core is starting or running; guards against a second core in the process.
 static STARTED: AtomicBool = AtomicBool::new(false);
+/// Set by `stopCore`; a core whose init is still running is dropped instead of started.
+static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 /// Events for Kotlin, as JSON lines, drained by `pollEvent`.
 static EVENTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
@@ -207,6 +209,9 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReady(
 /// `GnosisNative.stopCore()` — asks the core to shut down.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_stopCore(_env: *mut JNIEnv, _class: jclass) {
+    // Flag first: if init is still running, the init task sees it once init returns. If init
+    // already handed over its sender, Shutdown reaches the running core.
+    STOP_REQUESTED.store(true, Ordering::SeqCst);
     if let Some(sender) = TO_CORE.lock().unwrap().take() {
         let _ = sender.try_send(WorkerToCore::Shutdown);
     }
@@ -255,6 +260,7 @@ fn start_core(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: 
     if STARTED.swap(true, Ordering::SeqCst) {
         return Err("core already running".into());
     }
+    STOP_REQUESTED.store(false, Ordering::SeqCst);
     let result = prepare_and_spawn(data, cache, toml, blokli, network);
     if result.is_err() {
         STARTED.store(false, Ordering::SeqCst);
@@ -312,6 +318,15 @@ fn prepare_and_spawn(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, ne
         match Core::init(config, params, None, sender).await {
             Ok((core, to_core)) => {
                 *TO_CORE.lock().unwrap() = Some(to_core);
+                // Stopped while init ran (stopCore found no sender yet): never start this core.
+                if STOP_REQUESTED.load(Ordering::SeqCst) {
+                    TO_CORE.lock().unwrap().take();
+                    drop(core);
+                    STARTED.store(false, Ordering::SeqCst);
+                    tracing::info!("core stopped before it started");
+                    push_event(json!({ "type": "core_stopped" }));
+                    return;
+                }
                 tokio::spawn(async move {
                     while let Some(CoreToWorker::RequestToRoot(request)) = from_core.recv().await {
                         handle_request(request);
