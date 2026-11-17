@@ -41,4 +41,10 @@ object GnosisNative {
     @JvmStatic external fun tunReady(requestId: Long, fd: Int): String?
 
     @JvmStatic external fun stopCore()
+
+    /** Changes the core's log filter (EnvFilter syntax) at runtime; null on success. */
+    @JvmStatic external fun setLogFilter(filter: String): String?
+
+    /** Core log lines buffered since the last call (newline-separated), or null. */
+    @JvmStatic external fun pollLogs(): String?
 }

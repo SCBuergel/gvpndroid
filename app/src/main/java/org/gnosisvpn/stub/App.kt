@@ -78,15 +78,23 @@ class App : Application() {
         })
     }
 
+    private val stateLogger = Tunnel.Listener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
+
+    /** One per process: the Rust core and its event queue exist once. */
+    private val gnosisTunnel by lazy { GnosisTunnel(this) }
+
     /** Picks the backend from the device settings; called at start and after switching. */
     fun selectBackend() {
+        if (this::tunnel.isInitialized) tunnel.removeListener(stateLogger)
         usesGnosis = GnosisTunnel.isConfigured(this)
-        tunnel = if (usesGnosis) GnosisTunnel(this) else WireGuardTunnel(this, store, onSystemStart = {
+        tunnel = if (usesGnosis) gnosisTunnel else WireGuardTunnel(this, store, onSystemStart = {
             // Android started the VPN by itself: "Always-on VPN" is enabled for this app.
             LogBuffer.log("always-on VPN triggered by the system")
             TunnelService.start(this, TunnelService.ACTION_CONNECT)
         })
-        tunnel.addListener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
+        tunnel.addListener(stateLogger)
+        // Start the Gnosis core right away: syncing, peering and route probing take a while.
+        (tunnel as? GnosisTunnel)?.prestart()
     }
 
     companion object {

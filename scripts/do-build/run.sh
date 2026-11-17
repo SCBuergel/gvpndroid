@@ -3,6 +3,8 @@
 # copy it into app/src/main/jniLibs, and delete the droplet on every exit path.
 # A deadline (systemd user timer, default 6 h) deletes the droplet even if this script dies.
 # Usage: scripts/do-build/run.sh
+#        KEEP=1 scripts/do-build/run.sh   keep the droplet for iterating: scripts/do-build/rebuild.sh,
+#                                          then scripts/do-build/down.sh (the deadline stays armed)
 # Env: SIZE (c-32), REGION (ams3), PROFILE (fast | release), ABIS ("arm64-v8a x86_64"),
 #      CLIENT_REV (gnosis_vpn-client commit the patch is made for), DEADLINE_S (21600)
 # The DigitalOcean token is read by droplet.py from $DO_TOKEN_FILE (default ~/do-api-token).
@@ -21,6 +23,11 @@ step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 id=""
 teardown() {
     rc=$?
+    if [ -n "$id" ] && [ "${KEEP:-0}" = 1 ] && [ "$rc" = 0 ]; then
+        printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" > "$ST/current"
+        echo "KEPT droplet $id at $ip (deadline $NAME armed); iterate with scripts/do-build/rebuild.sh, end with scripts/do-build/down.sh"
+        exit 0
+    fi
     if [ -n "$id" ]; then
         if python3 -I scripts/do-build/droplet.py delete "$id"; then
             python3 "$DEADLINE" cancel "$NAME" >/dev/null 2>&1 || true

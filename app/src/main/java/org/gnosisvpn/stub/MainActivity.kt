@@ -28,7 +28,7 @@ class MainActivity : Activity() {
     private val stateListener = Tunnel.Listener { state, _ -> render(state) }
     private val logListener: (String) -> Unit = { appendLog(it) }
     private val tick = object : Runnable {
-        override fun run() { renderStats(); renderFunding(); ticker.postDelayed(this, 1000) }
+        override fun run() { renderStats(); renderFunding(); renderLocation(); ticker.postDelayed(this, 1000) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +51,19 @@ class MainActivity : Activity() {
         backend.text = if (app.usesGnosis) "Use WireGuard" else "Use Gnosis VPN"
         backend.isEnabled = app.usesGnosis || GnosisSetup.bundled(this)
         backend.setOnClickListener { switchBackend() }
+        findViewById<android.view.View>(R.id.gnosisRow).visibility =
+            if (app.usesGnosis) android.view.View.VISIBLE else android.view.View.GONE
+        findViewById<Button>(R.id.locationButton).setOnClickListener { pickLocation() }
+        findViewById<Button>(R.id.logButton).apply {
+            text = "Log: ${LogLevel.get(this@MainActivity).name.lowercase()}"
+            setOnClickListener {
+                val level = LogLevel.get(this@MainActivity).next()
+                LogLevel.set(this@MainActivity, level)
+                (tunnel as? GnosisTunnel)?.applyLogLevel(level)
+                text = "Log: ${level.name.lowercase()}"
+                LogBuffer.log("log level ${level.name.lowercase()}")
+            }
+        }
         findViewById<Button>(R.id.exportButton).apply {
             isEnabled = app.usesGnosis
             setOnClickListener {
@@ -71,7 +84,7 @@ class MainActivity : Activity() {
             startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
         }
 
-        LogBuffer.snapshot().forEach { appendLog(it) }
+        showRecentLog()
         LogBuffer.addListener(logListener)
         tunnel.addListener(stateListener)
         render(tunnel.state)
@@ -116,6 +129,32 @@ class MainActivity : Activity() {
         } else {
             TunnelService.start(this, TunnelService.ACTION_CONNECT)
         }
+    }
+
+    /** Lists the exits the core has discovered; picking one connects (or reconnects) there. */
+    private fun pickLocation() {
+        val gnosis = tunnel as? GnosisTunnel ?: return
+        val list = gnosis.destinations
+        if (list.isEmpty()) {
+            LogBuffer.log("no locations yet: the core is still starting (watch the log)")
+            return
+        }
+        val current = gnosis.selectedDestination()
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Location")
+            .setSingleChoiceItems(list.map { it.label }.toTypedArray(), list.indexOf(current)) { dialog, which ->
+                dialog.dismiss()
+                gnosis.selectDestination(list[which])
+                renderLocation()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun renderLocation() {
+        val gnosis = tunnel as? GnosisTunnel ?: return
+        val label = gnosis.selectedDestination()?.label ?: if (gnosis.destinations.isEmpty()) "loading…" else "choose"
+        findViewById<Button>(R.id.locationButton).text = "Location: $label"
     }
 
     /** Switches between the WireGuard and Gnosis backends, then restarts the app (the backend is chosen at start). */
@@ -240,8 +279,19 @@ class MainActivity : Activity() {
 
     private fun kb(b: Long) = if (b < 1024 * 1024) "%.1f KB".format(b / 1024.0) else "%.2f MB".format(b / 1048576.0)
 
+    /** Lines currently in the log view. Each append re-lays out the whole text, so keep it short. */
+    private var shownLines = 0
+
+    private fun showRecentLog() {
+        val recent = LogBuffer.snapshot().takeLast(SHOWN_MIN)
+        log.text = if (recent.isEmpty()) "" else recent.joinToString("\n", postfix = "\n")
+        shownLines = recent.size
+    }
+
     private fun appendLog(line: String) {
+        if (shownLines >= SHOWN_MAX) showRecentLog()
         log.append(line + "\n")
+        shownLines++
         logScroll.post { logScroll.fullScroll(ScrollView.FOCUS_DOWN) }
     }
 
@@ -249,5 +299,7 @@ class MainActivity : Activity() {
         private const val REQ_VPN = 1
         private const val REQ_NOTIFY = 2
         private const val REQ_EXPORT = 3
+        private const val SHOWN_MIN = 300
+        private const val SHOWN_MAX = 600
     }
 }

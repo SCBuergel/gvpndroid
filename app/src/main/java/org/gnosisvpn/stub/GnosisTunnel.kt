@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.system.Os
 import org.json.JSONObject
 import java.io.File
 import java.util.Properties
@@ -14,12 +15,20 @@ import java.util.concurrent.Executors
  * Gnosis VPN backend: the Rust client core (HOPR session to an exit, WireGuard inside it).
  *
  * Settings live in app-private storage (noBackupFilesDir), never in the APK or the repo:
- * - gnosis.properties: blokli_url, network, destination (the exit's destination id)
+ * - gnosis.properties: blokli_url, network, destination (an exit address or destination id)
  * - gnosis.toml: the client config (v7), with geoip_db and curvy_zk_dir pointing at files
  *   under noBackupFilesDir/gnosis-share
  * The node identity and its state are kept in noBackupFilesDir/gnosis.
+ *
+ * The core starts with the app ([prestart]) so it can sync, find peers and probe routes before
+ * the user taps Connect; a status poller keeps [destinations] current for the location picker.
  */
 class GnosisTunnel(private val context: Context) : Tunnel {
+    /** An exit the core knows about, for the location picker. */
+    data class Destination(val id: String, val address: String, val name: String, val place: String) {
+        val label get() = if (place.isEmpty()) name else "$name — $place"
+    }
+
     private val dir = context.noBackupFilesDir
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -28,10 +37,27 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     @Volatile private var tun: ParcelFileDescriptor? = null
     @Volatile private var tunParams: String? = null
     @Volatile private var wantConnected = false
+    @Volatile private var status: JSONObject? = null
+    /** Where to connect (exit address or destination id); read by the connect loop on every pass. */
+    @Volatile private var target: String? = null
+
+    @Volatile var destinations: List<Destination> = emptyList()
+        private set
 
     @Volatile
     override var state: Tunnel.State = Tunnel.State.DISCONNECTED
         private set
+
+    /** Starts the core without connecting (at app start), so connecting later is quicker. */
+    fun prestart() {
+        worker.execute {
+            try {
+                startCoreOnce(loadProps())
+            } catch (e: Exception) {
+                LogBuffer.log("gnosis: core start failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }
+    }
 
     override fun connect() {
         if (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED) return
@@ -41,7 +67,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             try {
                 val props = loadProps()
                 startCoreOnce(props)
-                connectWhenReady(props.getProperty("destination") ?: error("gnosis.properties has no destination"))
+                target = props.getProperty("destination") ?: error("gnosis.properties has no destination")
+                connectWhenReady()
             } catch (e: Exception) {
                 set(Tunnel.State.ERROR, "${e.javaClass.simpleName}: ${e.message}")
             }
@@ -53,10 +80,37 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         if (state == Tunnel.State.DISCONNECTED) return
         set(Tunnel.State.DISCONNECTING, null)
         worker.execute {
-            if (coreStarted) LogBuffer.log("gnosis: disconnect -> ${short(GnosisNative.command("""{"type":"disconnect"}"""))}")
-            closeTun()
+            disconnectCore()
             set(Tunnel.State.DISCONNECTED, null)
         }
+    }
+
+    /** Remembers [destination] (id or address) and, when connected or connecting, moves there. */
+    fun selectDestination(destination: Destination) {
+        saveProp("destination", destination.address)
+        LogBuffer.log("gnosis: location set to ${destination.label}")
+        target = destination.address
+        if (state == Tunnel.State.CONNECTED || state == Tunnel.State.CONNECTING) {
+            // Off the worker: it may be inside the connect loop, which picks up the new target.
+            Thread {
+                disconnectCore()
+                wantConnected = true
+                set(Tunnel.State.CONNECTING, "switching to ${destination.name}")
+                worker.execute { connectWhenReady() }
+            }.start()
+        }
+    }
+
+    /** The destination the settings point at (by address or id), if the core knows it. */
+    fun selectedDestination(): Destination? {
+        val wanted = runCatching { loadProps().getProperty("destination") }.getOrNull() ?: return null
+        return destinations.firstOrNull { it.address.equals(wanted, ignoreCase = true) || it.id == wanted }
+    }
+
+    /** Applies [level] to the core's log filter (and to the next start). */
+    fun applyLogLevel(level: LogLevel) {
+        runCatching { Os.setenv("RUST_LOG", level.coreFilter, true) }
+        if (coreStarted) GnosisNative.setLogFilter(level.coreFilter)?.let { LogBuffer.log("log filter rejected: $it") }
     }
 
     override fun stats(): Tunnel.Stats? = null
@@ -64,19 +118,35 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     override fun addListener(listener: Tunnel.Listener) { listeners += listener }
     override fun removeListener(listener: Tunnel.Listener) { listeners -= listener }
 
+    private fun disconnectCore() {
+        if (coreStarted) LogBuffer.log("gnosis: disconnect -> ${short(GnosisNative.command("""{"type":"disconnect"}"""))}")
+        closeTun()
+    }
+
+    private fun propsFile() = File(dir, "gnosis.properties")
+
     private fun loadProps() = Properties().apply {
-        val f = File(dir, "gnosis.properties")
+        val f = propsFile()
         require(f.exists()) { "missing ${f.path}" }
         f.inputStream().use { load(it) }
     }
 
+    private fun saveProp(key: String, value: String) {
+        val props = loadProps().apply { setProperty(key, value) }
+        propsFile().outputStream().use { props.store(it, "Gnosis VPN device settings") }
+    }
+
+    @Synchronized
     private fun startCoreOnce(props: Properties) {
         if (coreStarted) return
         GnosisNative.loadError?.let { error("native core not available: $it") }
         val config = File(dir, "gnosis.toml").readText()
         val data = File(dir, "gnosis").apply { mkdirs() }
         val cache = File(context.cacheDir, "gnosis").apply { mkdirs() }
-        LogBuffer.log("gnosis: starting core (${GnosisNative.version()})")
+        val level = LogLevel.get(context)
+        // Read by the core's logger when it initialises (in initAndroid).
+        runCatching { Os.setenv("RUST_LOG", level.coreFilter, true) }
+        LogBuffer.log("gnosis: starting core (${GnosisNative.version()}), log level ${level.name.lowercase()}")
         GnosisNative.initAndroid(context.applicationContext)
         GnosisNative.startCore(
             data.path, cache.path, config,
@@ -85,56 +155,78 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         )?.let { error("startCore: $it") }
         coreStarted = true
         Thread(::eventLoop, "gnosis-events").apply { isDaemon = true }.start()
+        Thread(::statusLoop, "gnosis-status").apply { isDaemon = true }.start()
     }
 
     /**
-     * Retries Connect until the core accepts it, logging status meanwhile (the node may still
-     * sync, deploy its Safe or wait for funds). [wanted] is a destination id or an exit address
-     * (0x…), resolved against the destinations the core reports. The full status is written to
+     * Polls the core's status: keeps [destinations] current, logs run-mode and connection changes
+     * (every phase in verbose/debug), shows funding needs, and writes the full status to
      * cacheDir/gnosis-status.json for debugging.
      */
-    private fun connectWhenReady(wanted: String) {
-        var lastSummary = ""
-        var lastDestinations = ""
-        while (wantConnected && state == Tunnel.State.CONNECTING) {
+    private fun statusLoop() {
+        var lastRun = ""
+        var lastConn = ""
+        var lastDests = ""
+        while (coreStarted) {
             val raw = GnosisNative.command("""{"type":"status"}""")
             runCatching { File(context.cacheDir, "gnosis-status.json").writeText(raw) }
             val data = runCatching { JSONObject(raw).getJSONObject("data") }.getOrNull()
-            if (data == null) {
-                LogBuffer.log("gnosis: status ${short(raw, 300)}")
-                Thread.sleep(10_000)
-                continue
+            if (data != null) {
+                status = data
+                val mode = data.optJSONObject("run_mode")
+                val runMode = mode?.optString("type") ?: "?"
+                if (runMode != lastRun) {
+                    LogBuffer.log("gnosis: run mode $runMode")
+                    lastRun = runMode
+                    if (runMode == "preparing_safe" && mode != null) logFundingNeed(mode)
+                }
+                if (runMode != "preparing_safe") FundingRequest.current = null
+                val verbose = LogLevel.get(context) != LogLevel.NORMAL
+                val connObj = data.optJSONObject("connection")
+                val conn = if (verbose) short(connObj?.toString() ?: "?", 400) else connObj?.optString("type") ?: "?"
+                if (conn != lastConn) { LogBuffer.log("gnosis: connection $conn"); lastConn = conn }
+                destinations = parseDestinations(data)
+                val names = destinations.joinToString(", ") { it.label }
+                if (names != lastDests && names.isNotEmpty()) { LogBuffer.log("gnosis: ${destinations.size} locations: $names"); lastDests = names }
             }
-            val runMode = data.optJSONObject("run_mode")?.optString("type") ?: "?"
-            val conn = data.optJSONObject("connection")?.optString("type") ?: "?"
-            val dests = data.optJSONArray("destinations")
-            val summary = "run_mode=$runMode connection=$conn destinations=${dests?.length() ?: 0}"
-            if (summary != lastSummary) {
-                LogBuffer.log("gnosis: $summary")
-                lastSummary = summary
-                if (runMode == "preparing_safe") logFundingNeed(data.getJSONObject("run_mode"))
-            }
-            if (runMode != "preparing_safe") FundingRequest.current = null
-            val list = (0 until (dests?.length() ?: 0)).map { i ->
-                val d = dests!!.getJSONObject(i).let { it.optJSONObject("destination") ?: it }
-                Triple(d.optString("id"), d.optString("address"), d.optJSONObject("meta")?.toString() ?: "")
-            }
-            val listText = list.joinToString("; ") { "${it.first} ${it.second} ${it.third}" }
-            if (listText.isNotEmpty() && listText != lastDestinations) {
-                LogBuffer.log("gnosis: destinations: ${short(listText, 1500)}")
-                lastDestinations = listText
-            }
-            val id = if (wanted.startsWith("0x")) list.firstOrNull { it.second.equals(wanted, ignoreCase = true) }?.first else wanted
+            Thread.sleep(if (state == Tunnel.State.CONNECTING) 3_000 else 10_000)
+        }
+    }
+
+    private fun parseDestinations(data: JSONObject): List<Destination> {
+        val arr = data.optJSONArray("destinations") ?: return emptyList()
+        return (0 until arr.length()).map { i ->
+            val d = arr.getJSONObject(i).let { it.optJSONObject("destination") ?: it }
+            val meta = d.optJSONObject("meta")
+            val other = meta?.optJSONObject("other")
+            val geo = d.optJSONObject("geo")
+            val place = listOfNotNull(
+                other?.optString("location")?.takeIf { it.isNotEmpty() },
+                (other?.optString("flag")?.takeIf { it.isNotEmpty() } ?: geo?.optString("country")?.takeIf { it.isNotEmpty() }),
+            ).joinToString(", ")
+            Destination(d.optString("id"), d.optString("address"), meta?.optString("name")?.takeIf { it.isNotEmpty() } ?: d.optString("id"), place)
+        }.sortedBy { it.label }
+    }
+
+    /** Retries Connect until the core accepts it, for the current [target]. */
+    private fun connectWhenReady() {
+        var waitedFor = ""
+        while (wantConnected && state == Tunnel.State.CONNECTING) {
+            val wanted = target ?: return
+            val data = status
+            val runMode = data?.optJSONObject("run_mode")?.optString("type")
+            val id = destinations.firstOrNull { it.address.equals(wanted, ignoreCase = true) || it.id == wanted }?.id
             if (runMode == "running" && id != null) {
                 val reply = GnosisNative.command(JSONObject().put("type", "connect").put("destination", id).toString())
                 val type = runCatching { JSONObject(reply).getJSONObject("data").getString("type") }.getOrDefault("?")
                 LogBuffer.log("gnosis: connect $id -> $type")
                 if (type in setOf("connecting", "already_connected", "waiting_to_connect")) return
                 LogBuffer.log("gnosis: connect reply ${short(reply, 600)}")
-            } else if (runMode == "running") {
-                LogBuffer.log("gnosis: destination $wanted not (yet) among the discovered ones")
+            } else {
+                val why = if (runMode != "running") "core is ${runMode ?: "starting"}" else "location $wanted not discovered yet"
+                if (why != waitedFor) { LogBuffer.log("gnosis: waiting to connect: $why"); waitedFor = why }
             }
-            Thread.sleep(10_000)
+            Thread.sleep(3_000)
         }
     }
 
@@ -148,12 +240,14 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         FundingRequest.current = FundingRequest(mode.optString("node_address"), need)
     }
 
+    /** Core events (tun requests) and the core's log lines for the screen. */
     private fun eventLoop() {
         while (true) {
+            GnosisNative.pollLogs()?.lineSequence()?.forEach { LogBuffer.logCore(short(it, 400)) }
             val raw = GnosisNative.pollEvent()
             if (raw == null) { Thread.sleep(200); continue }
             val event = JSONObject(raw)
-            LogBuffer.log("gnosis event: ${short(raw, 300)}")
+            if (LogLevel.get(context) != LogLevel.NORMAL) LogBuffer.log("gnosis event: ${short(raw, 300)}")
             when (event.optString("type")) {
                 "setup_tunnel" -> setupTunnel(event)
                 "teardown" -> {
@@ -175,8 +269,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 // In-place reconnect (new HOPR session, same tunnel address): hand the core the same
                 // tun so apps' open connections survive.
                 GnosisNative.tunReady(id, current.fd)?.let { error(it) }
-                LogBuffer.log("gnosis: reconnected in place, tun kept")
-                set(Tunnel.State.CONNECTED, null)
+                set(Tunnel.State.CONNECTED, "reconnected in place, tun kept")
                 return
             }
             val service = GnosisVpnService.obtain(context)

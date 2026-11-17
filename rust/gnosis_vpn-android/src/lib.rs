@@ -303,15 +303,28 @@ fn start_core(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: 
     Ok(())
 }
 
-/// Routes `tracing` output to Android's log (`adb logcat -s gnosisvpn`).
+/// Routes `tracing` output to Android's log (`adb logcat -s gnosisvpn`) and to a ring buffer the
+/// app drains with `pollLogs` (the phone has no logcat). The filter can be changed at runtime.
 mod logcat {
+    use std::collections::VecDeque;
     use std::ffi::CString;
     use std::io::{self, Write};
-    use std::sync::Once;
+    use std::sync::{Mutex, Once, OnceLock};
+
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{reload, EnvFilter, Registry};
+
+    /// Path-selection and probe chatter floods the log (millions of lines) and evicts everything else.
+    pub const DEFAULT_FILTER: &str = "info,hopr_transport::path=off,hopr_transport_probe=error,hopr_transport_p2p::swarm=warn";
+    const APP_LOG_MAX: usize = 3000;
 
     unsafe extern "C" {
         fn __android_log_write(prio: i32, tag: *const std::ffi::c_char, text: *const std::ffi::c_char) -> i32;
     }
+
+    static RELOAD: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
+    static APP_LOG: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
     struct Logcat(Vec<u8>);
 
@@ -323,11 +336,17 @@ mod logcat {
         fn flush(&mut self) -> io::Result<()> {
             let text = String::from_utf8_lossy(&self.0).trim_end().replace('\0', " ");
             self.0.clear();
-            if !text.is_empty() {
-                if let Ok(c) = CString::new(text) {
-                    // SAFETY: both pointers are valid NUL-terminated strings for the call.
-                    unsafe { __android_log_write(4 /* INFO */, c"gnosisvpn".as_ptr(), c.as_ptr()) };
-                }
+            if text.is_empty() {
+                return Ok(());
+            }
+            if let Ok(c) = CString::new(text.clone()) {
+                // SAFETY: both pointers are valid NUL-terminated strings for the call.
+                unsafe { __android_log_write(4 /* INFO */, c"gnosisvpn".as_ptr(), c.as_ptr()) };
+            }
+            let mut log = APP_LOG.lock().unwrap();
+            log.push_back(text);
+            while log.len() > APP_LOG_MAX {
+                log.pop_front();
             }
             Ok(())
         }
@@ -342,22 +361,56 @@ mod logcat {
     pub fn init() {
         static ONCE: Once = Once::new();
         ONCE.call_once(|| {
-            let filter = tracing_subscriber::EnvFilter::try_new(
-                // Path-selection and probe chatter floods logcat (millions of lines) and evicts
-                // everything else; RUST_LOG still overrides this default.
-                std::env::var("RUST_LOG").unwrap_or_else(|_| {
-                    "info,hopr_transport::path=off,hopr_transport_probe=error,hopr_transport_p2p::swarm=warn".into()
-                }),
-            )
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-            let _ = tracing_subscriber::fmt()
-                .with_env_filter(filter)
+            let wanted = std::env::var("RUST_LOG").unwrap_or_else(|_| DEFAULT_FILTER.into());
+            let filter = EnvFilter::try_new(wanted).unwrap_or_else(|_| EnvFilter::new(DEFAULT_FILTER));
+            let (filter, handle) = reload::Layer::new(filter);
+            let fmt = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .without_time()
-                .with_writer(|| Logcat(Vec::new()))
-                .try_init();
+                .with_writer(|| Logcat(Vec::new()));
+            if Registry::default().with(filter).with(fmt).try_init().is_ok() {
+                let _ = RELOAD.set(handle);
+            }
         });
     }
+
+    /// Replaces the filter (EnvFilter syntax, e.g. "warn,gnosis_vpn_lib=info"). Err if invalid.
+    pub fn set_filter(spec: &str) -> Result<(), String> {
+        init();
+        let filter = EnvFilter::try_new(spec).map_err(|e| e.to_string())?;
+        RELOAD.get().ok_or("logging not initialised")?.reload(filter).map_err(|e| e.to_string())
+    }
+
+    /// Takes up to `max` buffered lines.
+    pub fn drain(max: usize) -> Vec<String> {
+        let mut log = APP_LOG.lock().unwrap();
+        let n = log.len().min(max);
+        log.drain(..n).collect()
+    }
+}
+
+/// `GnosisNative.setLogFilter(filter: String): String?` — changes the core's log filter at runtime
+/// (EnvFilter syntax); null on success, else the error.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_setLogFilter(
+    env: *mut JNIEnv,
+    _class: jclass,
+    filter: jstring,
+) -> jstring {
+    let Some(spec) = get_string(env, filter) else {
+        return new_string(env, "filter is null or not UTF-8");
+    };
+    match logcat::set_filter(&spec) {
+        Ok(()) => ptr::null_mut(),
+        Err(e) => new_string(env, &e),
+    }
+}
+
+/// `GnosisNative.pollLogs(): String?` — buffered core log lines (newline-separated), or null.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_pollLogs(env: *mut JNIEnv, _class: jclass) -> jstring {
+    let lines = logcat::drain(500);
+    if lines.is_empty() { ptr::null_mut() } else { new_string(env, &lines.join("\n")) }
 }
 
 fn new_string(env: *mut JNIEnv, s: &str) -> jstring {
