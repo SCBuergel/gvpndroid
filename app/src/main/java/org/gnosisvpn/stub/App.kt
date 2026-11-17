@@ -1,0 +1,62 @@
+package org.gnosisvpn.stub
+
+import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import com.wireguard.android.backend.GoBackend
+
+class App : Application() {
+    lateinit var store: ConfigStore
+        private set
+    lateinit var tunnel: Tunnel
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
+        store = ConfigStore(this)
+        tunnel = WireGuardTunnel(this, store)
+        tunnel.addListener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
+
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(TunnelService.CHANNEL, "VPN status", NotificationManager.IMPORTANCE_LOW)
+        )
+
+        // Started by the system when the user enabled "Always-on VPN" for this app.
+        GoBackend.setAlwaysOnCallback {
+            LogBuffer.log("always-on VPN triggered by the system")
+            TunnelService.start(this, TunnelService.ACTION_CONNECT)
+        }
+
+        watchNetwork()
+        LogBuffer.log("process started")
+    }
+
+    /** Logs underlying network changes (Wi-Fi <-> mobile), which is where roaming problems show up. */
+    private fun watchNetwork() {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            private var last = ""
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                val kind = buildList {
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) add("vpn")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) add("wifi")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) add("cellular")
+                    if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) add("ethernet")
+                }.joinToString("+").ifEmpty { "other" }
+                val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                val desc = "$kind${if (validated) "" else " (not validated)"}"
+                if (desc != last) { last = desc; LogBuffer.log("default network: $desc") }
+            }
+            override fun onLost(network: Network) { last = ""; LogBuffer.log("default network lost") }
+        })
+    }
+
+    companion object {
+        lateinit var instance: App
+            private set
+    }
+}
