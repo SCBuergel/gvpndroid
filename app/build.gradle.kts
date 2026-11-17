@@ -11,8 +11,8 @@ android {
         applicationId = "org.gnosisvpn.stub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.2.3"
+        versionCode = 5
+        versionName = "0.3.0"
 
         // Phones: keep the prebuilt wireguard-go libraries for ARM, drop x86.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -23,7 +23,8 @@ android {
             applicationIdSuffix = ".debug"
             // Debug builds also run in redroid (x86_64 Android in Docker, scripts/emulator.sh),
             // so the same debug APK works on the phone and in the container. No 32-bit x86.
-            ndk { abiFilters += "x86_64" }
+            // -PphoneOnly leaves x86_64 out (smaller APK to download onto a phone).
+            if (!project.hasProperty("phoneOnly")) ndk { abiFilters += "x86_64" }
         }
     }
 

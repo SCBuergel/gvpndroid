@@ -21,13 +21,7 @@ class App : Application() {
         instance = this
         installCrashRecorder()
         store = ConfigStore(this)
-        usesGnosis = GnosisTunnel.isConfigured(this)
-        tunnel = if (usesGnosis) GnosisTunnel(this) else WireGuardTunnel(this, store, onSystemStart = {
-            // Android started the VPN by itself: "Always-on VPN" is enabled for this app.
-            LogBuffer.log("always-on VPN triggered by the system")
-            TunnelService.start(this, TunnelService.ACTION_CONNECT)
-        })
-        tunnel.addListener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
+        selectBackend()
 
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(TunnelService.CHANNEL, "VPN status", NotificationManager.IMPORTANCE_LOW)
@@ -82,6 +76,17 @@ class App : Application() {
             }
             override fun onLost(network: Network) { last = ""; LogBuffer.log("default network lost") }
         })
+    }
+
+    /** Picks the backend from the device settings; called at start and after switching. */
+    fun selectBackend() {
+        usesGnosis = GnosisTunnel.isConfigured(this)
+        tunnel = if (usesGnosis) GnosisTunnel(this) else WireGuardTunnel(this, store, onSystemStart = {
+            // Android started the VPN by itself: "Always-on VPN" is enabled for this app.
+            LogBuffer.log("always-on VPN triggered by the system")
+            TunnelService.start(this, TunnelService.ACTION_CONNECT)
+        })
+        tunnel.addListener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
     }
 
     companion object {

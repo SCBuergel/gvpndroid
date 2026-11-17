@@ -11,7 +11,8 @@ err() { echo "FAIL: $*" >&2; fail=1; }
 
 [ -s "$apk" ] || { echo "FAIL: no APK at $apk" >&2; exit 1; }
 listing=$(unzip -l "$apk")
-for abi in arm64-v8a armeabi-v7a x86_64; do
+abis="arm64-v8a armeabi-v7a x86_64"; [ "${PHONE_ONLY:-0}" = 1 ] && abis="arm64-v8a armeabi-v7a"
+for abi in $abis; do
     echo "$listing" | grep -q "lib/$abi/libwg-go.so" || err "lib/$abi/libwg-go.so missing"
 done
 # x86_64 is for redroid (debug builds); 32-bit x86 has no use here.

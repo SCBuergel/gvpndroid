@@ -109,7 +109,11 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             val conn = data.optJSONObject("connection")?.optString("type") ?: "?"
             val dests = data.optJSONArray("destinations")
             val summary = "run_mode=$runMode connection=$conn destinations=${dests?.length() ?: 0}"
-            if (summary != lastSummary) { LogBuffer.log("gnosis: $summary"); lastSummary = summary }
+            if (summary != lastSummary) {
+                LogBuffer.log("gnosis: $summary")
+                lastSummary = summary
+                if (runMode == "preparing_safe") logFundingNeed(data.getJSONObject("run_mode"))
+            }
             val list = (0 until (dests?.length() ?: 0)).map { i ->
                 val d = dests!!.getJSONObject(i).let { it.optJSONObject("destination") ?: it }
                 Triple(d.optString("id"), d.optString("address"), d.optJSONObject("meta")?.toString() ?: "")
@@ -131,6 +135,15 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             }
             Thread.sleep(10_000)
         }
+    }
+
+    /** A new node waits here until its address is funded; show what to send where. */
+    private fun logFundingNeed(mode: JSONObject) {
+        val rec = mode.optJSONObject("balance_recommendation")
+        fun tokens(wei: String?) = wei?.toBigDecimalOrNull()?.movePointLeft(18)?.stripTrailingZeros()?.toPlainString() ?: "?"
+        LogBuffer.log("gnosis: FUNDING NEEDED for node ${mode.optString("node_address")}: " +
+            "${tokens(rec?.optString("wxhopr"))} wxHOPR + ${tokens(rec?.optString("xdai"))} xDAI " +
+            "(has ${tokens(mode.optString("node_wxhopr"))} wxHOPR, ${tokens(mode.optString("node_xdai"))} xDAI)")
     }
 
     private fun eventLoop() {

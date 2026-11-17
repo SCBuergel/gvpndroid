@@ -23,3 +23,6 @@ app/src/main/jniLibs/
 
 # Agent worktrees
 .claude/
+
+# Gnosis VPN data files copied from the official package by scripts/gnosis-assets.sh
+app/src/main/assets/gnosis/

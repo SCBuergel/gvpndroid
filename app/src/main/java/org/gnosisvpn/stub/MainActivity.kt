@@ -47,6 +47,26 @@ class MainActivity : Activity() {
             }
         }
         findViewById<Button>(R.id.importButton).setOnClickListener { scanQr() }
+        val backend = findViewById<Button>(R.id.backendButton)
+        backend.text = if (app.usesGnosis) "Use WireGuard" else "Use Gnosis VPN"
+        backend.isEnabled = app.usesGnosis || GnosisSetup.bundled(this)
+        backend.setOnClickListener { switchBackend() }
+        findViewById<Button>(R.id.exportButton).apply {
+            isEnabled = app.usesGnosis
+            setOnClickListener {
+                if (!GnosisSetup.hasIdentity(this@MainActivity)) {
+                    LogBuffer.log("no identity yet: connect once so the core creates it")
+                } else {
+                    startActivityForResult(
+                        Intent(Intent.ACTION_CREATE_DOCUMENT)
+                            .addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/json")
+                            .putExtra(Intent.EXTRA_TITLE, "gnosisvpn-identity.json"),
+                        REQ_EXPORT,
+                    )
+                }
+            }
+        }
         findViewById<Button>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
         }
@@ -94,6 +114,28 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Switches between the WireGuard and Gnosis backends, then restarts the app (the backend is chosen at start). */
+    private fun switchBackend() {
+        if (tunnel.state != Tunnel.State.DISCONNECTED && tunnel.state != Tunnel.State.ERROR) {
+            LogBuffer.log("disconnect first")
+            return
+        }
+        val toGnosis = !app.usesGnosis
+        LogBuffer.log(if (toGnosis) "setting up Gnosis VPN (copying 46 MB of data files)..." else "switching to WireGuard (the Gnosis identity is kept)")
+        Thread {
+            try {
+                if (toGnosis) GnosisSetup.enable(this) else GnosisSetup.disable(this)
+                runOnUiThread {
+                    app.selectBackend()
+                    LogBuffer.log("backend: ${if (app.usesGnosis) "gnosis" else "wireguard"}")
+                    recreate()
+                }
+            } catch (e: Exception) {
+                LogBuffer.log("switch failed: ${e.javaClass.simpleName}: ${e.message}")
+            }
+        }.start()
+    }
+
     private fun scanQr() {
         IntentIntegrator(this)
             .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
@@ -110,6 +152,20 @@ class MainActivity : Activity() {
                 TunnelService.start(this, TunnelService.ACTION_CONNECT)
             } else {
                 LogBuffer.log("VPN permission denied")
+            }
+            return
+        }
+        if (requestCode == REQ_EXPORT) {
+            val uri = data?.data
+            if (resultCode == RESULT_OK && uri != null) {
+                try {
+                    GnosisSetup.exportIdentity(this, uri)
+                    LogBuffer.log("identity exported: keep that file safe, it controls the node's funds")
+                } catch (e: Exception) {
+                    LogBuffer.log("export failed: ${e.javaClass.simpleName}: ${e.message}")
+                }
+            } else {
+                LogBuffer.log("export cancelled")
             }
             return
         }
@@ -160,5 +216,6 @@ class MainActivity : Activity() {
     companion object {
         private const val REQ_VPN = 1
         private const val REQ_NOTIFY = 2
+        private const val REQ_EXPORT = 3
     }
 }
