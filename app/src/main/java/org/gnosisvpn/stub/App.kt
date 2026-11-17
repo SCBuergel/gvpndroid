@@ -17,6 +17,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        installCrashRecorder()
         store = ConfigStore(this)
         tunnel = WireGuardTunnel(this, store)
         tunnel.addListener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
@@ -31,9 +32,34 @@ class App : Application() {
             TunnelService.start(this, TunnelService.ACTION_CONNECT)
         }
 
-        watchNetwork()
         LogBuffer.log("process started")
+        reportPreviousCrash()
+        try {
+            watchNetwork()
+        } catch (e: Exception) {
+            LogBuffer.log("network watcher unavailable: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
+
+    /** Without adb there is no logcat, so keep the last crash in a file and show it on the next start. */
+    private fun installCrashRecorder() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, e ->
+            runCatching { crashFile().writeText("thread ${thread.name}\n${e.stackTraceToString()}") }
+            previous?.uncaughtException(thread, e)
+        }
+    }
+
+    private fun reportPreviousCrash() {
+        val f = crashFile()
+        if (!f.exists()) return
+        val lines = f.readLines()
+        LogBuffer.log("PREVIOUS CRASH (${java.util.Date(f.lastModified())}):")
+        lines.filter { it.isNotBlank() }.take(25).forEach { LogBuffer.log("  $it") }
+        f.delete()
+    }
+
+    private fun crashFile() = java.io.File(filesDir, "last-crash.txt")
 
     /** Logs underlying network changes (Wi-Fi <-> mobile), which is where roaming problems show up. */
     private fun watchNetwork() {
