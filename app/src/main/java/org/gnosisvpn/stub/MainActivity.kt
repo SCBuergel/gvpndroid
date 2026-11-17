@@ -49,7 +49,8 @@ class MainActivity : Activity() {
         findViewById<Button>(R.id.importButton).setOnClickListener { scanQr() }
         val backend = findViewById<Button>(R.id.backendButton)
         backend.text = if (app.usesGnosis) "Use WireGuard" else "Use Gnosis VPN"
-        backend.isEnabled = app.usesGnosis || GnosisSetup.bundled(this)
+        // Gnosis needs both the bundled data files and the Rust core library in this APK.
+        backend.isEnabled = app.usesGnosis || (GnosisSetup.bundled(this) && GnosisNative.loadError == null)
         backend.setOnClickListener { switchBackend() }
         findViewById<android.view.View>(R.id.gnosisRow).visibility =
             if (app.usesGnosis) android.view.View.VISIBLE else android.view.View.GONE
@@ -59,7 +60,7 @@ class MainActivity : Activity() {
             setOnClickListener {
                 val level = LogLevel.get(this@MainActivity).next()
                 LogLevel.set(this@MainActivity, level)
-                (tunnel as? GnosisTunnel)?.applyLogLevel(level)
+                tunnel.setLogLevel(level)
                 text = "Log: ${level.name.lowercase()}"
                 LogBuffer.log("log level ${level.name.lowercase()}")
             }
@@ -90,8 +91,8 @@ class MainActivity : Activity() {
         render(tunnel.state)
 
         val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        intent.getStringExtra("preview_funding_address")?.takeIf { debuggable }?.let {
-            FundingRequest.current = FundingRequest(it, "preview only")
+        previewFunding = intent.getStringExtra("preview_funding_address")?.takeIf { debuggable }?.let {
+            Tunnel.FundingRequest(it, "preview only")
         }
         if (savedInstanceState == null) {
             val pkg = packageManager.getPackageInfo(packageName, 0)
@@ -133,18 +134,17 @@ class MainActivity : Activity() {
 
     /** Lists the exits the core has discovered; picking one connects (or reconnects) there. */
     private fun pickLocation() {
-        val gnosis = tunnel as? GnosisTunnel ?: return
-        val list = gnosis.destinations
+        val list = tunnel.locations
         if (list.isEmpty()) {
             LogBuffer.log("no locations yet: the core is still starting (watch the log)")
             return
         }
-        val current = gnosis.selectedDestination()
+        val current = tunnel.selectedLocation
         android.app.AlertDialog.Builder(this)
             .setTitle("Location")
             .setSingleChoiceItems(list.map { it.label }.toTypedArray(), list.indexOf(current)) { dialog, which ->
                 dialog.dismiss()
-                gnosis.selectDestination(list[which])
+                tunnel.selectLocation(list[which])
                 renderLocation()
             }
             .setNegativeButton("Cancel", null)
@@ -152,12 +152,12 @@ class MainActivity : Activity() {
     }
 
     private fun renderLocation() {
-        val gnosis = tunnel as? GnosisTunnel ?: return
-        val label = gnosis.selectedDestination()?.label ?: if (gnosis.destinations.isEmpty()) "loading…" else "choose"
+        if (!app.usesGnosis) return
+        val label = tunnel.selectedLocation?.label ?: if (tunnel.locations.isEmpty()) "loading…" else "choose"
         findViewById<Button>(R.id.locationButton).text = "Location: $label"
     }
 
-    /** Switches between the WireGuard and Gnosis backends, then restarts the app (the backend is chosen at start). */
+    /** Switches between the WireGuard and Gnosis backends in place (data files are copied off the main thread). */
     private fun switchBackend() {
         if (tunnel.state != Tunnel.State.DISCONNECTED && tunnel.state != Tunnel.State.ERROR) {
             LogBuffer.log("disconnect first")
@@ -173,7 +173,8 @@ class MainActivity : Activity() {
                     LogBuffer.log("backend: ${if (app.usesGnosis) "gnosis" else "wireguard"}")
                     recreate()
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable: a missing native library surfaces as UnsatisfiedLinkError, an Error.
                 LogBuffer.log("switch failed: ${e.javaClass.simpleName}: ${e.message}")
             }
         }.start()
@@ -249,11 +250,13 @@ class MainActivity : Activity() {
         }
     }
 
-    private var shownFunding: FundingRequest? = null
+    private var shownFunding: Tunnel.FundingRequest? = null
+    /** Debug builds only: a funding request to preview the QR without a waiting node. */
+    private var previewFunding: Tunnel.FundingRequest? = null
 
     /** QR code of the node address while a new node waits for funds (plain address: any wallet can scan it). */
     private fun renderFunding() {
-        val request = FundingRequest.current
+        val request = tunnel.fundingRequest ?: previewFunding
         if (request == shownFunding) return
         shownFunding = request
         val box = findViewById<android.view.View>(R.id.fundingBox)

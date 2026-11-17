@@ -1,5 +1,6 @@
 package org.gnosisvpn.stub
 
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
@@ -7,8 +8,11 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * The VpnService for the Gnosis backend. It only builds the tun when the core asks for it;
- * TunnelService owns the foreground notification and the lifecycle.
+ * The VpnService of the Gnosis backend. It builds the tun when the core asks for it;
+ * TunnelService owns the foreground notification and the connect/disconnect lifecycle.
+ *
+ * Only the active backend's VpnService is enabled (App.selectBackend), so "Always-on VPN" starts
+ * this one when the Gnosis backend is selected; it then connects through TunnelService.
  */
 class GnosisVpnService : VpnService() {
     override fun onCreate() {
@@ -17,11 +21,19 @@ class GnosisVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        running = CompletableFuture()
+        if (running.getNow(null) === this) running = CompletableFuture()
         super.onDestroy()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // The system starts a VpnService with the SERVICE_INTERFACE action for Always-on VPN
+        // (also after boot); the app's own starts carry no action.
+        if (intent?.action == SERVICE_INTERFACE) {
+            LogBuffer.log("always-on VPN triggered by the system")
+            TunnelService.start(this, TunnelService.ACTION_CONNECT)
+        }
+        return START_NOT_STICKY
+    }
 
     override fun onRevoke() {
         LogBuffer.log("VPN revoked by the system (another VPN took over?)")
@@ -49,12 +61,14 @@ class GnosisVpnService : VpnService() {
         @Volatile private var running = CompletableFuture<GnosisVpnService>()
 
         /** Starts the service if needed and returns the running instance. */
-        fun obtain(context: android.content.Context): GnosisVpnService {
+        fun obtain(context: Context): GnosisVpnService {
             context.startService(Intent(context, GnosisVpnService::class.java))
             return running.get(10, TimeUnit.SECONDS)
         }
 
-        fun stop(context: android.content.Context) {
+        fun stop(context: Context) {
+            // Forget the instance first, so an obtain() racing with the stop waits for a new one.
+            running = CompletableFuture()
             context.stopService(Intent(context, GnosisVpnService::class.java))
         }
     }

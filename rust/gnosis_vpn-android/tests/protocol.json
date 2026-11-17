@@ -1,0 +1,237 @@
+{
+ "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0 (exit addresses are public).",
+ "commands": {
+  "status": "{\"type\":\"status\"}",
+  "disconnect": "{\"type\":\"disconnect\"}",
+  "connect": "{\"type\":\"connect\",\"destination\":\"gvpn-ger-1-j9os\"}"
+ },
+ "status_running": {
+  "type": "status",
+  "data": {
+   "run_mode": {
+    "type": "running",
+    "hopr_status": {
+     "type": "running"
+    },
+    "funding_status": {
+     "traffic": {
+      "type": "good"
+     },
+     "gas": {
+      "type": "good"
+     },
+     "wxhopr_deficit": null,
+     "xdai_deficit": null,
+     "refill_shortfall": null
+    },
+    "channel_maintenance": {
+     "type": "ok"
+    }
+   },
+   "destinations": [
+    {
+     "destination": {
+      "id": "bonnie-prince-charlie-cp8u",
+      "meta": {
+       "name": "Bonnie Prince Charlie",
+       "description": null,
+       "other": {
+        "flag": "UK",
+        "location": "Edinburgh"
+       }
+      },
+      "geo": {
+       "country": "GB",
+       "source": {
+        "type": "announced_ip"
+       }
+      },
+      "address": "0xE7FD1aBD8DAA1BfA58D96a2620d6e827A64cB2fc",
+      "hops": 1,
+      "gnosis_vpn_server": "172.30.0.1:8000",
+      "wireguard_server": "172.30.0.1:51820",
+      "source": {
+       "type": "discovered"
+      },
+      "overrides": {
+       "configured_meta": {},
+       "configured_gnosis_vpn_server": null,
+       "configured_wireguard_server": null
+      }
+     },
+     "route_health": {
+      "state": {
+       "type": "routable"
+      },
+      "last_error": null,
+      "walk": {
+       "type": "paths",
+       "walked_at": 1794944505491,
+       "count": 3,
+       "distinct_first_relays": 3,
+       "best_relays": [
+        "0x942f2f256B7B00EAD42dd3938505ae2ab8Ae3e67"
+       ],
+       "best_value": 0.8841114207999616,
+       "return_count": 3,
+       "return_best_relays": [
+        "0x8370b362037555ed756DF45d095f1F229c31ec2b"
+       ],
+       "return_best_value": 0.2298673408
+      },
+      "quick_probe": null
+     }
+    },
+    {
+     "destination": {
+      "id": "gvpn-ger-1-j9os",
+      "meta": {
+       "name": "GVPN-GER-1",
+       "description": null,
+       "other": {}
+      },
+      "geo": {
+       "country": "DE",
+       "source": {
+        "type": "announced_ip"
+       }
+      },
+      "address": "0xe5cE4ae09Ac49e74F3a4d649B93CF0e2CF1DE7bf",
+      "hops": 1,
+      "gnosis_vpn_server": "172.30.0.1:8000",
+      "wireguard_server": "172.30.0.1:51820",
+      "source": {
+       "type": "discovered"
+      },
+      "overrides": {
+       "configured_meta": {},
+       "configured_gnosis_vpn_server": null,
+       "configured_wireguard_server": null
+      }
+     },
+     "route_health": {
+      "state": {
+       "type": "routable"
+      },
+      "last_error": null,
+      "walk": {
+       "type": "paths",
+       "walked_at": 1794944505494,
+       "count": 3,
+       "distinct_first_relays": 3,
+       "best_relays": [
+        "0xC20e27A158891D8994Ef0346C0c94dFe6377D04E"
+       ],
+       "best_value": 0.7697826838068121,
+       "return_count": 3,
+       "return_best_relays": [
+        "0xf4a841e3c338588Ac3e94524EE07b40619f08bD2"
+       ],
+       "return_best_value": 0.33120951808
+      },
+      "quick_probe": null
+     }
+    }
+   ],
+   "target": null,
+   "connection": {
+    "type": "disconnected"
+   },
+   "disconnecting": [],
+   "probe": null,
+   "pix_chunk_bytes": 660160512,
+   "probing": {
+    "level": {
+     "type": "high"
+    },
+    "reason": {
+     "type": "not_ready",
+     "held_for": 202
+    },
+    "focus": [
+     "gvpn-fra-1-xp4e",
+     "gvpn-ger-1-j9os",
+     "gvpn-rs-1-0ax9",
+     "gvpn-por-1-sfiy",
+     "isambard-kingdom-brunel-r6ag",
+     "gvpn-lt-1-ynm1",
+     "bonnie-prince-charlie-cp8u",
+     "gvpn-kenya-1-tzm3"
+    ]
+   },
+   "recent": [
+    "gvpn-fra-1-xp4e",
+    "gvpn-ger-1-j9os"
+   ]
+  }
+ },
+ "status_preparing_safe": {
+  "type": "status",
+  "data": {
+   "run_mode": {
+    "type": "preparing_safe",
+    "node_address": "0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072",
+    "node_xdai": "0",
+    "node_wxhopr": "0",
+    "funding_tool": null,
+    "error": null,
+    "balance_recommendation": {
+     "wxhopr": "225350000002225467152",
+     "xdai": "5000000000000000",
+     "channel_stakes": "180000000002225467152",
+     "pix_float": "35350000000000000000",
+     "fee_to_start": "10000000000000000000",
+     "txs_to_start": 3,
+     "xdai_fee_per_tx": "50000000000000",
+     "topup_headroom": "0"
+    }
+   },
+   "destinations": [],
+   "target": null,
+   "connection": {
+    "type": "disconnected"
+   },
+   "disconnecting": [],
+   "probe": null,
+   "pix_chunk_bytes": 660160512,
+   "probing": {
+    "level": {
+     "type": "high"
+    },
+    "reason": {
+     "type": "not_ready",
+     "held_for": 202
+    },
+    "focus": [
+     "gvpn-fra-1-xp4e",
+     "gvpn-ger-1-j9os",
+     "gvpn-rs-1-0ax9",
+     "gvpn-por-1-sfiy",
+     "isambard-kingdom-brunel-r6ag",
+     "gvpn-lt-1-ynm1",
+     "bonnie-prince-charlie-cp8u",
+     "gvpn-kenya-1-tzm3"
+    ]
+   },
+   "recent": [
+    "gvpn-fra-1-xp4e",
+    "gvpn-ger-1-j9os"
+   ]
+  }
+ },
+ "expected": {
+  "locations": [
+   [
+    "0xE7FD1aBD8DAA1BfA58D96a2620d6e827A64cB2fc",
+    "Bonnie Prince Charlie",
+    "Edinburgh, UK"
+   ],
+   [
+    "0xe5cE4ae09Ac49e74F3a4d649B93CF0e2CF1DE7bf",
+    "GVPN-GER-1",
+    "DE"
+   ]
+  ],
+  "funding_need": "225.350000002225467152 wxHOPR + 0.005 xDAI"
+ }
+}

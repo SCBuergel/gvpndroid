@@ -1,27 +1,52 @@
 # gvpndroid
 
-Stub Android app for Gnosis VPN: a plain WireGuard VPN built with the official
-prebuilt WireGuard tunnel library, behind a small `Tunnel` interface so the backend
-can later be swapped for the Gnosis VPN client. No Rust, no HOPR, no NDK.
+Android app for Gnosis VPN, the working basis for a production UI. The UI talks to one
+interface, `Tunnel`, with two backends:
+
+- **Gnosis VPN** (`GnosisTunnel`): the Gnosis VPN client core (Rust, v1.0.0) via JNI;
+  WireGuard carried over a 1-hop HOPR session to an exit, with PIX payments. Tested on prod
+  (piz-palu) in redroid and on a Pixel.
+- **Plain WireGuard** (`WireGuardTunnel`): the official prebuilt WireGuard library, for
+  separating Android VPN problems from HOPR problems.
 
 ## Layout
 
-- `app/src/main/java/org/gnosisvpn/stub/Tunnel.kt`: the interface the UI uses
-  (connect, disconnect, state, stats). Backends implement it.
-- `WireGuardTunnel.kt`: backend using `com.wireguard.android:tunnel` (GoBackend, prebuilt wireguard-go).
-- `TunnelService.kt`: foreground service with notification and Disconnect action; restarts
-  the tunnel after process death; the always-on callback starts it too.
-- `ConfigStore.kt`: the WireGuard config, imported on the phone by QR scan into
-  app-private storage. Configs and keys are never in the APK or the repo.
-- `App.kt`, `LogBuffer.kt`: logging of state, network changes, kill switch state, and the
-  last crash (shown on the next start, since there is no logcat without adb).
-- `MainActivity.kt`: Connect/Disconnect, Import QR, VPN settings, status, stats, log.
-- `app/src/test/`: JVM unit tests (config summary carries no keys; config migration).
-- `scripts/build.sh`: memory-guarded build, lint and unit tests, then `scripts/check-apk.sh`
-  (native libs, 16 KB alignment, permissions, required classes, no packaged secrets).
-- `scripts/show-config-qr.sh`: shows a config as a QR code on screen.
-- `scripts/emulator.sh`, `scripts/e2e-emulator.sh`: local Android in Docker (redroid) and an
-  end-to-end VPN test against it; see "Test without a phone".
+App (`app/src/main/java/org/gnosisvpn/stub/`):
+
+- `Tunnel.kt`: the interface the UI uses. Core: connect, disconnect, state, stats, listeners.
+  Optional capabilities with "unsupported" defaults: locations, selected location,
+  `selectLocation`, funding request, log level, `shutdown`. The UI never needs to know which
+  backend it talks to.
+- `GnosisTunnel.kt`: Gnosis backend. Starts the core with the app, polls its status
+  (locations, funding needs), answers its tun requests, keeps the tun across reconnects and
+  location switches (no traffic outside the VPN), `shutdown` stops the core.
+- `GnosisProtocol.kt`: the JSON contract with the core (commands, status parsing); pure, unit
+  tested against `rust/gnosis_vpn-android/tests/protocol.json`.
+- `GnosisNative.kt`: the JNI functions of `libgnosisvpn.so`.
+- `GnosisVpnService.kt`: the Gnosis backend's VpnService (builds the tun; Always-on start).
+- `GnosisSetup.kt`: "Use Gnosis VPN" copies the bundled data files to app storage and writes
+  the device settings; "Export identity" saves the node key file via the system file picker.
+- `WireGuardTunnel.kt`, `ConfigStore.kt`: WireGuard backend and its QR-imported config.
+- `TunnelService.kt`: foreground service with notification and Disconnect action.
+- `App.kt`: picks the backend; enables exactly one of the two VpnServices so Always-on VPN
+  starts the backend in use. `LogBuffer.kt`, `LogLevel.kt`: on-screen log (the core's lines
+  too, since a phone has no logcat) at normal/verbose/debug.
+- `MainActivity.kt`: stub UI: connect, backend switch, location, log level, funding QR, log.
+
+Rust and build:
+
+- `rust/gnosis_vpn-android/`: the JNI bridge crate (plays the desktop root process for the
+  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client v1.0.0.
+- `scripts/do-build/`: builds the Rust core on a throwaway DigitalOcean droplet.
+- `scripts/gnosis-assets.sh`: copies the client package's data files into the APK's assets.
+- `scripts/build.sh`: memory-guarded build, lint, unit tests, then `scripts/check-apk.sh`
+  (native libs incl. the Rust core, data files, 16 KB alignment, permissions, no secrets).
+- `scripts/emulator.sh`, `scripts/e2e-emulator.sh`, `scripts/gnosis-emulator.sh`: redroid
+  (Android in Docker) and end-to-end tests for both backends.
+- `scripts/show-config-qr.sh`: shows a WireGuard config as a QR code on screen.
+
+Not covered yet: 32-bit ARM phones get no Rust core (WireGuard only); the core's in-tunnel
+health ping is skipped (the app is excluded from its own VPN), so idle tunnels may reconnect.
 
 ## Config
 
@@ -131,12 +156,24 @@ when `no_backup/gnosis.properties` exists in the app's private storage.
   `destination` = exit address or id) and `gnosis.toml` (the packaged v7 config plus
   `geoip_db` and `curvy_zk_dir` pointing at `no_backup/gnosis-share/`, whose files come from
   the official gnosisvpn package).
-- The node identity lives in `no_backup/gnosis/`. Back it up before funding it.
+- The node identity lives in `no_backup/gnosis/`. Back it up before funding it (in the app:
+  Export identity). A new node shows its address as a QR code while it waits for funds.
+
+### On a phone (no adb)
+
+    scripts/gnosis-assets.sh UNPACKED_DEB_ROOT     # once: data files into the APK's assets
+    scripts/build.sh assembleDebug -PphoneOnly     # ARM-only APK, then PHONE_ONLY=1 scripts/check-apk.sh
+
+In the app: "Use Gnosis VPN", then Connect. Disconnect before installing an update.
 
 ### Build the Rust core
 
     scripts/do-build/run.sh                      # both ABIs, fast profile, about 9 min
     ABIS=arm64-v8a scripts/do-build/run.sh       # phone only
+    KEEP=1 scripts/do-build/run.sh               # keep the droplet: rebuild.sh, then down.sh
+
+The crate's contract tests (`cargo test -p gnosis_vpn-android`) run on the droplet, on the host
+target. Rebuild after every change under `rust/`: the libraries in `jniLibs/` are not tracked.
 
 It rents a DigitalOcean c-32 droplet, builds, copies the libraries into
 `app/src/main/jniLibs/` (gitignored), and deletes the droplet on every exit path, with a 6 h
@@ -149,6 +186,8 @@ deletion deadline as a backstop. `PROFILE=release` uses the client's fat LTO pro
     scripts/gnosis-emulator.sh setup CONF_DIR SHARE_DIR
     scripts/gnosis-emulator.sh connect
     scripts/gnosis-emulator.sh log
+    scripts/gnosis-emulator.sh e2e     # PASS/FAIL; manual only: each run pays the exit (PIX)
 
-Pitfalls: never `adb root` while the VPN is up (a root adbd's replies are routed into the
+Pitfalls: reinstalling or force-stopping the app while its VPN is up can break redroid's
+networking until `emulator.sh stop`/`start`; never `adb root` while the VPN is up (a root adbd's replies are routed into the
 tunnel and adb goes offline); redroid's lmkd floods logcat, so `emulator.sh` stops it.

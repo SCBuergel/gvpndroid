@@ -11,7 +11,7 @@ t=$(date +%s); step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
 # cloud-init may still hold the apt lock right after boot
 cloud-init status --wait >/dev/null 2>&1 || true
 apt-get update -qq
-apt-get install -y -qq build-essential cmake git unzip pkg-config clang curl ca-certificates >/dev/null
+apt-get install -y -qq build-essential cmake git unzip pkg-config clang curl ca-certificates libmnl-dev libnftnl-dev >/dev/null  # nftables libs: host build of the crate tests
 step apt
 
 curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none >/dev/null 2>&1

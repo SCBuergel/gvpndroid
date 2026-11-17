@@ -20,6 +20,7 @@ use std::os::fd::BorrowedFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -42,6 +43,8 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
 /// Our end of the TUN fd-passing socket; the core's end is registered with `set_tun_fd_socket`.
 static TUN_SOCKET: OnceLock<UnixStream> = OnceLock::new();
+/// Set while a core is starting or running; guards against a second core in the process.
+static STARTED: AtomicBool = AtomicBool::new(false);
 /// Events for Kotlin, as JSON lines, drained by `pollEvent`.
 static EVENTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
@@ -63,6 +66,7 @@ fn to_core() -> Option<mpsc::Sender<WorkerToCore>> {
 /// `GnosisNative.initAndroid(context: Context)` — once per process, before `startCore`: gives the
 /// TLS certificate verifier (rustls-platform-verifier, used by reqwest for Blokli) the JVM and a
 /// Context. Without it the first HTTPS request aborts the process.
+#[cfg(target_os = "android")]
 #[jni::jni_mangle("org.gnosisvpn.stub.GnosisNative")]
 pub fn initAndroid<'caller>(
     mut unowned_env: jni::EnvUnowned<'caller>,
@@ -128,9 +132,10 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_startCore(
     }
 }
 
-/// `GnosisNative.command(json: String): String` — sends a `WorkerCommand` (serde JSON, e.g.
-/// `"Status"` or `{"Connect":{"destination":"..."}}`) and returns the core's `Response` as JSON,
-/// or `{"error":"..."}`. Blocks up to 60 s: never call it on the main thread.
+/// `GnosisNative.command(json: String): String` — sends a `WorkerCommand` as JSON (serde tag
+/// "type", snake_case: `{"type":"status"}`, `{"type":"connect","destination":"<id>"}`) and returns
+/// the core's `Response` as JSON, or `{"error":"..."}`. Blocks up to 60 s: never call it on the
+/// main thread. tests/protocol.json pins the format on both sides.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_command(
     env: *mut JNIEnv,
@@ -145,7 +150,9 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_command(
 }
 
 fn command(text: &str) -> Result<String, String> {
-    let cmd: WorkerCommand = serde_json::from_str(text).map_err(|e| format!("bad command {text}: {e}"))?;
+    // Never echo the command: some carry secrets (FundingTool), and the reply ends up in logs.
+    let cmd: WorkerCommand = serde_json::from_str(text)
+        .map_err(|e| format!("bad command ({:?} error at line {} column {})", e.classify(), e.line(), e.column()))?;
     let sender = to_core().ok_or("core is not running")?;
     runtime().block_on(async move {
         let (resp, rx) = oneshot::channel();
@@ -245,18 +252,39 @@ fn handle_request(request: RequestToRoot) {
 
 fn start_core(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: String) -> Result<(), String> {
     logcat::init();
-    if TO_CORE.lock().unwrap().is_some() {
+    if STARTED.swap(true, Ordering::SeqCst) {
         return Err("core already running".into());
     }
+    let result = prepare_and_spawn(data, cache, toml, blokli, network);
+    if result.is_err() {
+        STARTED.store(false, Ordering::SeqCst);
+    }
+    result
+}
+
+/// Sets a process environment variable the core reads, but only before the tokio runtime (and
+/// with it any core thread) exists. Later starts may only repeat the same value.
+fn set_env_before_runtime(name: &str, value: &std::ffi::OsStr) -> Result<(), String> {
+    if std::env::var_os(name).as_deref() == Some(value) {
+        return Ok(());
+    }
+    if RUNTIME.get().is_some() {
+        return Err(format!("{name} cannot change while the app runs; restart the app"));
+    }
+    // SAFETY: no runtime thread exists yet and Kotlin serialises startCore calls, so no Rust
+    // thread reads the environment concurrently.
+    unsafe { std::env::set_var(name, value) };
+    Ok(())
+}
+
+fn prepare_and_spawn(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: String) -> Result<(), String> {
     // Android's default temp dir (/data/local/tmp) is not writable by apps.
-    // SAFETY: set before the core starts using it; no other thread reads the environment concurrently.
-    unsafe { std::env::set_var("TMPDIR", &cache) };
+    set_env_before_runtime("TMPDIR", cache.as_os_str())?;
     let config = gnosis_vpn_lib::config::parse(toml).map_err(|e| format!("config: {e}"))?;
     // The PIX prover (curvy-witnesscalc) finds its proving files only through this variable; on
     // desktop root sets it when spawning the worker. Without it PIX payments fail and the exit
     // stalls inbound traffic until it is paid.
-    // SAFETY: as above, before the core starts.
-    unsafe { std::env::set_var(gnosis_vpn_lib::hopr::CURVY_ZK_DIR_ENV, &config.curvy_zk_dir) };
+    set_env_before_runtime(gnosis_vpn_lib::hopr::CURVY_ZK_DIR_ENV, config.curvy_zk_dir.as_os_str())?;
     let blokli_url = url::Url::parse(blokli).map_err(|e| format!("blokli url: {e}"))?;
     let host = blokli_url.host_str().ok_or("blokli url has no host")?.to_string();
     let port = blokli_url.port_or_known_default().unwrap_or(443);
@@ -292,10 +320,12 @@ fn start_core(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: 
                 push_event(json!({ "type": "core_started" }));
                 core.start().await;
                 TO_CORE.lock().unwrap().take();
+                STARTED.store(false, Ordering::SeqCst);
                 push_event(json!({ "type": "core_stopped" }));
             }
             Err(e) => {
                 tracing::error!(error = %e, "core init failed");
+                STARTED.store(false, Ordering::SeqCst);
                 push_event(json!({ "type": "core_error", "error": e.to_string() }));
             }
         }
@@ -307,6 +337,7 @@ fn start_core(data: PathBuf, cache: PathBuf, toml: &str, blokli: &str, network: 
 /// app drains with `pollLogs` (the phone has no logcat). The filter can be changed at runtime.
 mod logcat {
     use std::collections::VecDeque;
+    #[cfg(target_os = "android")]
     use std::ffi::CString;
     use std::io::{self, Write};
     use std::sync::{Mutex, Once, OnceLock};
@@ -319,8 +350,22 @@ mod logcat {
     pub const DEFAULT_FILTER: &str = "info,hopr_transport::path=off,hopr_transport_probe=error,hopr_transport_p2p::swarm=warn";
     const APP_LOG_MAX: usize = 3000;
 
+    #[cfg(target_os = "android")]
     unsafe extern "C" {
         fn __android_log_write(prio: i32, tag: *const std::ffi::c_char, text: *const std::ffi::c_char) -> i32;
+    }
+
+    /// Host builds (the crate's tests) have no liblog.
+    #[cfg(target_os = "android")]
+    fn write_logcat(text: &str) {
+        if let Ok(c) = CString::new(text) {
+            // SAFETY: both pointers are valid NUL-terminated strings for the call.
+            unsafe { __android_log_write(4 /* INFO */, c"gnosisvpn".as_ptr(), c.as_ptr()) };
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    fn write_logcat(text: &str) {
+        eprintln!("{text}");
     }
 
     static RELOAD: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
@@ -339,10 +384,7 @@ mod logcat {
             if text.is_empty() {
                 return Ok(());
             }
-            if let Ok(c) = CString::new(text.clone()) {
-                // SAFETY: both pointers are valid NUL-terminated strings for the call.
-                unsafe { __android_log_write(4 /* INFO */, c"gnosisvpn".as_ptr(), c.as_ptr()) };
-            }
+            write_logcat(&text);
             let mut log = APP_LOG.lock().unwrap();
             log.push_back(text);
             while log.len() > APP_LOG_MAX {
@@ -432,5 +474,50 @@ fn get_string(env: *mut JNIEnv, s: jstring) -> Option<String> {
         let out = CStr::from_ptr(chars).to_str().ok().map(str::to_owned);
         ((**env).v1_1.ReleaseStringUTFChars)(env, s, chars);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gnosis_vpn_ipc::Response;
+    use gnosis_vpn_lib::command::WorkerCommand;
+    use serde_json::Value;
+
+    fn fixture() -> Value {
+        serde_json::from_str(include_str!("../tests/protocol.json")).expect("tests/protocol.json is JSON")
+    }
+
+    /// The command strings the app sends are WorkerCommands the core accepts.
+    #[test]
+    fn app_commands_parse_as_worker_commands() {
+        let f = fixture();
+        for (name, text) in f["commands"].as_object().unwrap() {
+            let parsed: Result<WorkerCommand, _> = serde_json::from_str(text.as_str().unwrap());
+            assert!(parsed.is_ok(), "command {name} rejected: {parsed:?}");
+        }
+        let connect: WorkerCommand = serde_json::from_str(f["commands"]["connect"].as_str().unwrap()).unwrap();
+        assert!(matches!(connect, WorkerCommand::Connect { .. }));
+    }
+
+    /// The status samples the app's parser is tested with are real Responses of this client.
+    #[test]
+    fn status_samples_are_responses() {
+        let f = fixture();
+        for key in ["status_running", "status_preparing_safe"] {
+            let parsed: Result<Response, _> = serde_json::from_value(f[key].clone());
+            assert!(parsed.is_ok(), "{key} is not a Response: {parsed:?}");
+            // Round trip: what the bridge sends Kotlin keeps the fields the app reads.
+            let back = serde_json::to_value(parsed.unwrap()).unwrap();
+            assert_eq!(back["type"], "status");
+            assert!(back["data"]["run_mode"]["type"].is_string());
+        }
+    }
+
+    /// A rejected command must not echo its text (funding commands carry a secret).
+    #[test]
+    fn bad_command_error_does_not_echo_the_command() {
+        let secret = r#"{"type":"funding_tool","secret":"TOP-SECRET-CODE","oops":"#;
+        let err = super::command(secret).unwrap_err();
+        assert!(!err.contains("TOP-SECRET-CODE"), "{err}");
     }
 }

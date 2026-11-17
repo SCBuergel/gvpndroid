@@ -25,16 +25,22 @@ object GnosisSetup {
         val zk = File(share, "curvy-zk").apply { mkdirs() }
         context.assets.list("$ASSETS/curvy-zk")!!.forEach { copyAsset(context, "$ASSETS/curvy-zk/$it", File(zk, it)) }
         val template = context.assets.open("$ASSETS/config.toml").bufferedReader().readText()
-        val config = buildString {
-            append("version = 7\n")
-            append("geoip_db = \"${File(share, "geoip.mmdb").path}\"\n")
-            append("curvy_zk_dir = \"${zk.path}\"\n")
-            template.lineSequence().filterNot { it.trim().startsWith("version") }.forEach { append(it).append('\n') }
-        }
+        val config = assembleConfig(template, File(share, "geoip.mmdb").path, zk.path)
         GnosisNative.checkConfig(config)?.let { error("bundled config rejected: $it") }
         File(nb, "gnosis.toml").writeText(config)
         val props = File(nb, "gnosis.properties")
         if (!props.exists()) copyAsset(context, "$ASSETS/gnosis.properties", props)
+    }
+
+    /**
+     * The packaged v7 config with the two data-file paths set. Both are top-level keys, so they
+     * must come before the first [table]; the template's own version line is replaced.
+     */
+    fun assembleConfig(template: String, geoipDb: String, curvyZkDir: String): String = buildString {
+        append("version = 7\n")
+        append("geoip_db = \"$geoipDb\"\n")
+        append("curvy_zk_dir = \"$curvyZkDir\"\n")
+        template.lineSequence().filterNot { it.trim().startsWith("version") }.forEach { append(it).append('\n') }
     }
 
     fun disable(context: Context) {

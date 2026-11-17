@@ -1,6 +1,8 @@
 package org.gnosisvpn.stub
 
 import android.app.Application
+import android.content.ComponentName
+import android.content.pm.PackageManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.net.ConnectivityManager
@@ -85,16 +87,35 @@ class App : Application() {
 
     /** Picks the backend from the device settings; called at start and after switching. */
     fun selectBackend() {
-        if (this::tunnel.isInitialized) tunnel.removeListener(stateLogger)
+        if (this::tunnel.isInitialized) {
+            tunnel.removeListener(stateLogger)
+            tunnel.shutdown()
+        }
         usesGnosis = GnosisTunnel.isConfigured(this)
+        enableVpnService(usesGnosis)
         tunnel = if (usesGnosis) gnosisTunnel else WireGuardTunnel(this, store, onSystemStart = {
             // Android started the VPN by itself: "Always-on VPN" is enabled for this app.
             LogBuffer.log("always-on VPN triggered by the system")
             TunnelService.start(this, TunnelService.ACTION_CONNECT)
         })
         tunnel.addListener(stateLogger)
+        tunnel.setLogLevel(LogLevel.get(this))
         // Start the Gnosis core right away: syncing, peering and route probing take a while.
-        (tunnel as? GnosisTunnel)?.prestart()
+        if (usesGnosis) gnosisTunnel.prestart()
+    }
+
+    /**
+     * Enables exactly one of the app's two VpnServices (the WireGuard library's and the Gnosis
+     * one), so "Always-on VPN" starts the backend in use rather than an undefined one.
+     */
+    private fun enableVpnService(gnosis: Boolean) {
+        fun set(component: ComponentName, enabled: Boolean) = packageManager.setComponentEnabledSetting(
+            component,
+            if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+            PackageManager.DONT_KILL_APP,
+        )
+        set(ComponentName(this, GnosisVpnService::class.java), gnosis)
+        set(ComponentName(this, "com.wireguard.android.backend.GoBackend\$VpnService"), !gnosis)
     }
 
     companion object {

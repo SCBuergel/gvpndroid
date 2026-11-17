@@ -5,7 +5,7 @@ import android.content.Context
 /** How much the on-screen log shows; stored in plain preferences (nothing secret). */
 enum class LogLevel(val coreFilter: String) {
     /** The connection story: core decisions, PIX holds, reconnects; warnings from everything else. */
-    NORMAL("warn,gnosisvpn=info,gnosis_vpn_lib::core=info,gnosis_vpn_lib::connection=info,hopr_strategy::pix=info,hopr_lib::builder=info,hopr_transport::protocol::stream=off"),
+    NORMAL("warn,hopr_transport::path=off,gnosisvpn=info,gnosis_vpn_lib::core=info,gnosis_vpn_lib::connection=info,hopr_strategy::pix=info,hopr_lib::builder=info,hopr_transport::protocol::stream=off"),
     /** Everything at info, minus the path/probe chatter that floods the log. */
     VERBOSE("info,hopr_transport::path=off,hopr_transport_probe=error,hopr_transport_p2p::swarm=warn"),
     /** Debug for the client and HOPR, info for libraries. */

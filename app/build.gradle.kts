@@ -53,4 +53,6 @@ dependencies {
     implementation("org.rustls:rustls-platform-verifier:0.2.0")
 
     testImplementation("junit:junit:4.13.2")
+    // Real org.json for unit tests (android.jar's is a stub that returns defaults).
+    testImplementation("org.json:json:20240303")
 }

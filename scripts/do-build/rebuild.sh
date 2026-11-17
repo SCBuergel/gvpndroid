@@ -8,7 +8,7 @@ ST=$HOME/.local/state/gvpndroid-do
 . <(sed 's/^/export /' "$ST/current")
 ABIS=${ABIS:-arm64-v8a x86_64}; PROFILE=${PROFILE:-fast}
 SSH_OPTS=(-i "$ST/id_ed25519" -o "UserKnownHostsFile=$known_hosts" -o BatchMode=yes -o ConnectTimeout=5)
-scp -q -r "${SSH_OPTS[@]}" rust/gnosis_vpn-android/Cargo.toml rust/gnosis_vpn-android/build.rs rust/gnosis_vpn-android/src \
+scp -q -r "${SSH_OPTS[@]}" rust/gnosis_vpn-android/Cargo.toml rust/gnosis_vpn-android/build.rs rust/gnosis_vpn-android/src rust/gnosis_vpn-android/tests \
     "root@$ip:/src/gnosis_vpn-client/gnosis_vpn-android/"
 s=$(date +%s)
 ssh "${SSH_OPTS[@]}" "root@$ip" "ABIS='$ABIS' PROFILE=$PROFILE bash /root/upload/build-remote.sh" 2>&1 \

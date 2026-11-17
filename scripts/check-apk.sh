@@ -1,5 +1,6 @@
 #!/bin/sh
-# Smoke-check the built debug APK: native libs (ARM + x86_64), 16 KB alignment, permissions, no secrets.
+# Smoke-check the built debug APK: native libs (ARM + x86_64), the Gnosis core and data files,
+# 16 KB alignment, permissions, no secrets.
 # Usage: scripts/check-apk.sh [APK]
 set -eu
 cd "$(dirname "$0")/.."
@@ -19,6 +20,18 @@ done
 echo "$listing" | grep -qE 'lib/x86/' && err "32-bit x86 libraries present (abiFilters not applied)"
 echo "$listing" | grep -qiE '\.(conf|key)$' && err "a .conf or .key file is packaged"
 "$bt/zipalign" -c -P 16 4 "$apk" || err "not 16 KB zip-aligned"
+
+# The Gnosis backend: the Rust core per ABI and the data files (both gitignored local inputs, so
+# a build without them must fail here, not on the phone). GNOSIS=0 for a WireGuard-only APK.
+if [ "${GNOSIS:-1}" = 1 ]; then
+    gabis="arm64-v8a x86_64"; [ "${PHONE_ONLY:-0}" = 1 ] && gabis="arm64-v8a"
+    for abi in $gabis; do
+        echo "$listing" | grep -q "lib/$abi/libgnosisvpn.so" || err "lib/$abi/libgnosisvpn.so missing (scripts/do-build/run.sh)"
+    done
+    for f in config.toml gnosis.properties geoip.mmdb curvy-zk/verifyPixAggregationBound_2_9_30-final.zkey curvy-zk/pix-aggregation-bound-2-9-30.signet.zst; do
+        echo "$listing" | grep -q "assets/gnosis/$f" || err "assets/gnosis/$f missing (scripts/gnosis-assets.sh)"
+    done
+fi
 
 # Classes the QR scanner needs at runtime but does not declare (crashed 0.2.1 when missing).
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
