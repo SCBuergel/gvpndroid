@@ -11,8 +11,8 @@ android {
         applicationId = "org.gnosisvpn.stub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.2"
+        versionCode = 4
+        versionName = "0.2.3"
 
         // Phones only: keep the prebuilt wireguard-go libraries for ARM, drop x86.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
