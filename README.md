@@ -16,6 +16,10 @@ can later be swapped for the Gnosis VPN client. No Rust, no HOPR, no NDK.
 - `App.kt`, `LogBuffer.kt`: logging of state, network changes, kill switch state, and the
   last crash (shown on the next start, since there is no logcat without adb).
 - `MainActivity.kt`: Connect/Disconnect, Import QR, VPN settings, status, stats, log.
+- `app/src/test/`: JVM unit tests (config summary carries no keys; config migration).
+- `scripts/build.sh`: memory-guarded build, lint and unit tests, then `scripts/check-apk.sh`
+  (native libs, 16 KB alignment, permissions, required classes, no packaged secrets).
+- `scripts/show-config-qr.sh`: shows a config as a QR code on screen.
 
 ## Config
 

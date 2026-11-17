@@ -21,8 +21,10 @@ echo "$listing" | grep -qiE '\.(conf|key)$' && err "a .conf or .key file is pack
 # Classes the QR scanner needs at runtime but does not declare (crashed 0.2.1 when missing).
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 unzip -q -o "$apk" 'classes*.dex' -d "$tmp"
+# Match class definitions (dexdump), not references: zxing's own code references them anyway.
+defined=$(for d in "$tmp"/classes*.dex; do "$bt/dexdump" "$d" 2>/dev/null; done | grep "Class descriptor")
 for c in androidx/core/content/ContextCompat androidx/core/app/ActivityCompat; do
-    grep -qa "L$c;" "$tmp"/classes*.dex || err "class $c missing from dex"
+    echo "$defined" | grep -qF "'L$c;'" || err "class $c not defined in the APK"
 done
 
 perms=$("$bt/aapt2" dump permissions "$apk")

@@ -14,9 +14,7 @@ class ConfigStore(context: Context) {
 
     init {
         // 0.2.x kept the config in filesDir; move it out of backup/transfer reach.
-        val old = File(context.filesDir, "tunnel.conf")
-        if (old.exists() && !file.exists()) old.renameTo(file)
-        old.delete()
+        migrateConfig(File(context.filesDir, "tunnel.conf"), file)
     }
 
     /** Parses and validates [text]; stores it only if valid. Returns the parsed config. */
@@ -27,6 +25,18 @@ class ConfigStore(context: Context) {
     }
 
     fun load(): Config? = if (file.exists()) file.inputStream().use { Config.parse(it) } else null
+}
+
+/**
+ * Moves [old] to [new] unless [new] already exists. [old] is deleted only once [new] exists,
+ * so a failed move never loses the config.
+ */
+internal fun migrateConfig(old: File, new: File) {
+    if (!old.exists()) return
+    if (!new.exists() && !old.renameTo(new)) {
+        runCatching { old.copyTo(new) }
+    }
+    if (new.exists()) old.delete()
 }
 
 /** One-line summary for the log, without any key material. */
