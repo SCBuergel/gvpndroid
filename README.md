@@ -116,3 +116,39 @@ Alternatively, adb over Wi-Fi (untested on this phone; may be blocked by Advance
     adb connect PHONE_IP:PORT
     adb install -r --user USER_ID app/build/outputs/apk/debug/app-debug.apk
     adb logcat -s GnosisVpnStub
+
+## Gnosis VPN backend (Rust core)
+
+The app has two `Tunnel` backends: plain WireGuard (`WireGuardTunnel`) and the Gnosis VPN
+client core (`GnosisTunnel`, WireGuard carried over a HOPR session). The Gnosis backend is used
+when `no_backup/gnosis.properties` exists in the app's private storage.
+
+- `rust/gnosis_vpn-android`: JNI bridge, built as `libgnosisvpn.so` inside a
+  gnosis_vpn-client checkout (v1.0.0) with `rust/patches/0001-android-target.patch` applied.
+  It plays the desktop root process: the tun comes from `GnosisVpnService`, the kill switch is
+  Android's Always-on VPN, in-tunnel pings are skipped (the app is excluded from its own VPN).
+- Device settings (outside the repo): `gnosis.properties` (`blokli_url`, `network`,
+  `destination` = exit address or id) and `gnosis.toml` (the packaged v7 config plus
+  `geoip_db` and `curvy_zk_dir` pointing at `no_backup/gnosis-share/`, whose files come from
+  the official gnosisvpn package).
+- The node identity lives in `no_backup/gnosis/`. Back it up before funding it.
+
+### Build the Rust core
+
+    scripts/do-build/run.sh                      # both ABIs, fast profile, about 9 min
+    ABIS=arm64-v8a scripts/do-build/run.sh       # phone only
+
+It rents a DigitalOcean c-32 droplet, builds, copies the libraries into
+`app/src/main/jniLibs/` (gitignored), and deletes the droplet on every exit path, with a 6 h
+deletion deadline as a backstop. `PROFILE=release` uses the client's fat LTO profile
+(about 18 min for two ABIs, mostly single-threaded).
+
+### Test in redroid
+
+    scripts/emulator.sh start
+    scripts/gnosis-emulator.sh setup CONF_DIR SHARE_DIR
+    scripts/gnosis-emulator.sh connect
+    scripts/gnosis-emulator.sh log
+
+Pitfalls: never `adb root` while the VPN is up (a root adbd's replies are routed into the
+tunnel and adb goes offline); redroid's lmkd floods logcat, so `emulator.sh` stops it.
