@@ -1,0 +1,19 @@
+# Build output
+build/
+.gradle/
+.kotlin/
+*.apk
+*.aab
+local.properties
+.idea/
+*.iml
+
+# Secrets: WireGuard configs and keys must never be committed
+*.conf
+*.key
+*.keystore
+*.jks
+
+# Session files
+.session-brief.md
+.start-session.sh
