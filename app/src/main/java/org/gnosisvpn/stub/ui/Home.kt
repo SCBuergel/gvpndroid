@@ -351,7 +351,7 @@ private fun DetailCard(eng: Engine, act: Act, label: @Composable () -> Unit, chk
                     Kv(if (c == Conn.CONNECTED) "Connected for" else "Route", if (c == Conn.CONNECTED) dur((eng.connSec / 60).toInt()) else "1 hop", mono = c == Conn.CONNECTED)
                 } else if (c == Conn.PAUSED) when (pz) {
                     Pause.OFFLINE -> { Kv("Exit", "Offline", p.err); Kv("Data lost", "${eng.lost.roundToInt()} MB", mono = true) }
-                    Pause.RENEWFAIL -> { Kv("Renewal", "Failed", p.err); if (eng.retryCountdown) Kv("Next try in", eng.retryText(), mono = true) else Kv("Retrying", "Automatically") }
+                    Pause.RENEWFAIL -> { Kv("Payment", "Failed", p.err); if (eng.retryCountdown) Kv("Next try in", eng.retryText(), mono = true) else Kv("Retrying", "Automatically") }
                     else -> { Kv("This session", "${a.roundToInt()} MB", p.err, mono = true); if (pz == Pause.BALANCE) Kv("Balance", eng.balanceText(), p.err, true) else Kv("Traffic", "Blocked", p.err) }
                 } else {
                     Kv("Ping", if (c == Conn.RECONNECTING || e.ping <= 0) "—" else "${e.ping.grouped()} ms", if (c == Conn.RECONNECTING) p.onV else if (e.ping < 500) p.okT else if (e.ping < 900) p.warn else p.err, true)

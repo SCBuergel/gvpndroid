@@ -4,8 +4,10 @@
 # A deadline (systemd user timer, 1 h by default) deletes the droplet even if this script dies.
 # Usage: scripts/do-build/app.sh [GRADLE TASKS...]   (default: assembleDebug lintDebug testDebugUnitTest)
 # Env: SIZE (s-8vcpu-16gb, $0.143/h), REGION (fra1), DEADLINE_S (3600)
-# Uploads: the working tree without build output, VCS data or secret-looking files; the debug
-# keystore (so the APK updates the installed app); the log relay's topic and PUBLIC key only.
+# Uploads: the working tree without build output, VCS data, session notes or secret-looking files;
+# the log relay's topic and PUBLIC key only; and ~/.android/debug.keystore, deliberately: it signs
+# the debug APK, and only an APK with the same signature updates the installed app in place (and
+# keeps its node identity). The droplet is deleted afterwards; never use this for a release key.
 # Results: app/build/outputs/apk/debug/app-debug.apk (checked with scripts/check-apk.sh),
 #          app/build/remote/{test-results,reports}, app/build/remote/build.log
 set -euo pipefail
@@ -55,6 +57,7 @@ step ssh
 
 tar -C "$REPO" -czf "$W/src.tgz" --exclude=./build --exclude=./app/build --exclude=.gradle --exclude=.kotlin \
     --exclude=.git --exclude=.claude --exclude=local.properties --exclude='*.conf' --exclude='*.key' \
+    --exclude=.session-brief.md --exclude=.start-session.sh \
     --exclude='*.keystore' --exclude='*.jks' --exclude='rust/*/target' .
 ssh_ 'mkdir -p /root/src /root/.android /root/relay && chmod 700 /root/relay'
 ssh_ 'tar -C /root/src -xzf -' < "$W/src.tgz"
@@ -81,7 +84,17 @@ step setup
 
 # Detached on the droplet so a dropped SSH connection does not kill the build.
 ssh_ "cd /root/src && nohup bash -c 'ANDROID_HOME=/opt/sdk GVPNDROID_SECRETS=/root/relay ./gradlew --no-daemon $TASKS; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
-until ssh_ 'grep -q "^JOB-EXIT" /root/build.log' 2>/dev/null; do sleep 15; done
+# Bounded: stop before the deadline deletes the droplet, or when it stops answering.
+limit=$(( t0 + DEADLINE_S - 300 )); fails=0
+while :; do
+    if r=$(ssh_ 'grep -c "^JOB-EXIT" /root/build.log' 2>/dev/null); then
+        fails=0; [ "${r:-0}" -gt 0 ] && break
+    else
+        fails=$((fails + 1)); [ "$fails" -ge 8 ] && { echo "droplet stopped answering (8 ssh failures in a row)" >&2; exit 1; }
+    fi
+    [ "$(date +%s)" -lt "$limit" ] || { echo "build still running 5 min before the deadline; giving up" >&2; exit 1; }
+    sleep 15
+done
 mkdir -p app/build/remote
 ssh_ 'cat /root/build.log' > app/build/remote/build.log
 grep -E 'BUILD|^e: |FAILED|JOB-EXIT|tests completed' app/build/remote/build.log | tail -8

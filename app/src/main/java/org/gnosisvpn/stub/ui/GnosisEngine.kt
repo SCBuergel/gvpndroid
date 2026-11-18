@@ -8,6 +8,9 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+/** How long after a failed PIX payment the app keeps saying so, while the core retries. */
+private const val PAY_FAIL_HOLD_S = 180.0
+
 /**
  * The app's engine: every screen shows what the Gnosis VPN core reports through [Tunnel].
  *
@@ -36,6 +39,12 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     private var session: Tunnel.Session? = null
     private var lastBought: Long? = null
     private var lastPayFail = false
+    /**
+     * When (engine time) a PIX payment for this connection last failed. After a failed payment the
+     * core ends the exit's hold and reconnects, so the session alone flips between reconnecting
+     * and connected. This keeps the app on "Couldn't pay for data" until a payment goes through.
+     */
+    private var payFailAt: Double? = null
     private var rx: Pair<Double, Double>? = null
     private var lastCounters: Tunnel.Stats? = null
     private var lastCountersAt = 0L
@@ -192,6 +201,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         when {
             st == Tunnel.State.DISCONNECTED || st == Tunnel.State.ERROR -> {
                 if (conn != Conn.IDLE) { conn = Conn.IDLE; pause = null; offConfirm = false; nextCheck = t + 20; sessionStart = null }
+                payFailAt = null
             }
             st == Tunnel.State.DISCONNECTING -> {}
             s == null -> if (conn != Conn.CONNECTING) { conn = Conn.CONNECTING; cStart = now(); cDur = 60_000 }   // waiting for the core
@@ -213,11 +223,15 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                     lastBought = bought
                 }
                 val reachable = e.routable && !e.offline
+                if (s.payment == Tunnel.Payment.FAILED) payFailAt = t
+                else if (s.payment == Tunnel.Payment.FUNDED && !s.awaitingPayment) payFailAt = null
+                val payFailing = payFailAt?.let { t - it < PAY_FAIL_HOLD_S } == true
                 val newConn = when {
-                    s.reconnecting -> if (!reachable) Conn.PAUSED else Conn.RECONNECTING
+                    s.reconnecting && !reachable -> Conn.PAUSED
+                    payFailing -> Conn.PAUSED
+                    s.reconnecting -> Conn.RECONNECTING
                     s.step != null && s.step < s.steps - 1 && !s.stalled && tn.state != Tunnel.State.CONNECTED -> Conn.CONNECTING
                     s.awaitingPayment && (wallet?.trafficLevel == Tunnel.Level.EMPTY) -> Conn.PAUSED
-                    s.awaitingPayment && s.payment == Tunnel.Payment.FAILED -> Conn.PAUSED
                     s.stalled -> Conn.RECONNECTING
                     else -> Conn.CONNECTED
                 }

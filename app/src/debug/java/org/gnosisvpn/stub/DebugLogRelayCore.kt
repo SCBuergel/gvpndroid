@@ -3,7 +3,7 @@ package org.gnosisvpn.stub
 // =================================================================================================
 //  DEBUG BUILDS ONLY. REMOVE BEFORE PRODUCTION.
 //  Part of the developer log relay (see DebugLogRelay.kt in this source set). This file lives in
-//  app/src/debug, so release builds do not contain it; app/src/release has a no-op stub.
+//  app/src/debug (its splash notice in app/src/debugRelay), so release builds do not contain it; app/src/release has a no-op stub.
 // =================================================================================================
 
 import org.bouncycastle.crypto.agreement.X25519Agreement
@@ -24,8 +24,10 @@ object DebugLogRelayCore {
     const val TAG = "gvpndroid-log-v1"
 
     /**
-     * ntfy.sh allows an anonymous sender 250 messages a day per IP address. With the VPN on, that
-     * IP is the exit's. A token bucket keeps the relay under that limit: it holds up to [CAP]
+     * ntfy.sh allows an anonymous sender 250 messages a day per IP address. With the Gnosis
+     * backend the app is excluded from its own VPN (GnosisVpnService: addDisallowedApplication),
+     * so the relay posts from the device's own network and IP, also while the VPN is on, and that
+     * IP's budget is shared with nothing else of ours. A token bucket keeps the relay under it: it holds up to [CAP]
      * messages and refills [PER_DAY] a day, so no rolling day gets more than CAP + PER_DAY = 245.
      * Ordinary log lines leave [RESERVE] in the bucket. Lines that look like a problem
      * ([URGENT]) may use the reserve.
@@ -46,6 +48,9 @@ object DebugLogRelayCore {
             const val RESERVE = 8.0
         }
     }
+
+    /** Marks the relay's own log lines; they never make a tick urgent (a failing relay must not spend the reserve). */
+    const val OWN = "debug log relay:"
 
     val URGENT = Regex("(?i)\\b(error|errors|failed|failure|panic|crash|crashed|fatal|stall|stalled|unrecoverable|refused|denied|exception)\\b")
 
@@ -96,6 +101,66 @@ object DebugLogRelayCore {
         val b = ByteArrayOutputStream()
         GZIPOutputStream(b).use { it.write(s.toByteArray(Charsets.UTF_8)) }
         return b.toByteArray()
+    }
+
+    /** What one [Queue.flush] did. */
+    enum class Outcome { NOTHING, SENT, BUDGET, LIMITED, FAILED }
+
+    /**
+     * The relay's state between ticks: which log lines are still to be sent and how many were lost.
+     * Plain Kotlin, so the send logic is unit-tested; DebugLogRelay feeds it from LogBuffer and
+     * gives it the HTTP POST.
+     */
+    class Queue(private val maxPending: Int = 6000) {
+        /** LogBuffer line count up to which lines have been taken. */
+        var cursor = 0L
+            private set
+        val pending = ArrayDeque<String>()
+        /** Lines lost before they were sent (log ring overran, or this queue was full). */
+        var dropped = 0L
+            private set
+        /** Messages sent so far (numbered in the title). */
+        var seq = 0L
+            private set
+
+        /** Takes new lines: [fresh] from LogBuffer.since(cursor), which reports [next] and [lost]. */
+        fun take(fresh: List<String>, next: Long, lost: Long) {
+            cursor = next
+            dropped += lost
+            pending.addAll(fresh)
+            while (pending.size > maxPending) { pending.removeFirst(); dropped++ }
+        }
+
+        /** Switched off: forget everything up to [now] (LogBuffer's count); nothing old is sent later. */
+        fun reset(now: Long) { pending.clear(); dropped = 0; cursor = now }
+
+        /**
+         * Sends what the [budget] allows, oldest lines first, one sealed message per piece. [send]
+         * gets the gzip'd piece and its message number and returns the HTTP status, or -1 without
+         * a connection. Only lines of pieces that were accepted leave the queue.
+         */
+        fun flush(header: String, budget: Budget, send: (ByteArray, Long) -> Int): Outcome {
+            if (pending.isEmpty() && dropped == 0L) return Outcome.NOTHING
+            val urgent = pending.any { !it.contains(OWN) && URGENT.containsMatchIn(it) }
+            // The loss note is a line of its own, so it goes out once, in the first piece.
+            val note = if (dropped > 0) listOf("[$dropped lines were not sent: log ring or relay buffer full]") else emptyList()
+            val lines = note + pending.toList()
+            var sent = false
+            for ((plain, n) in pack(header, lines)) {
+                if (!budget.canSend(urgent)) return if (sent) Outcome.SENT else Outcome.BUDGET
+                when (send(plain, seq + 1)) {
+                    in 200..299 -> {
+                        budget.spend(); seq++; sent = true
+                        var k = n
+                        if (dropped > 0 && note.isNotEmpty()) { dropped = 0; k-- }
+                        repeat(minOf(k, pending.size)) { pending.removeFirst() }
+                    }
+                    429 -> { budget.exhausted(); return Outcome.LIMITED }
+                    else -> return if (sent) Outcome.SENT else Outcome.FAILED
+                }
+            }
+            return Outcome.SENT
+        }
     }
 
     /**

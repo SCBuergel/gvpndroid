@@ -12,7 +12,7 @@ import java.math.BigDecimal
 
 /**
  * What the UI shows comes from these parsers: exit health, the session with its data chunks, the
- * wallet and start-up steps. Samples follow client v1.0.0's IPC types
+ * wallet and start-up steps. Samples follow client 7d745df's IPC v2 types
  * (gnosis_vpn-ipc protocol.rs); the running status is a real reply from tests/protocol.json.
  */
 class GnosisLiveDataTest {

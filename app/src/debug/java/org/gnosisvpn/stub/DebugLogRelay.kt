@@ -48,10 +48,7 @@ object DebugLogRelay {
     @Volatile private var on = true
 
     // Touched only on the relay thread.
-    private var cursor = 0L
-    private val pending = ArrayDeque<String>()
-    private var dropped = 0L
-    private var seq = 0L
+    private val queue = DebugLogRelayCore.Queue(MAX_PENDING)
     private var failing = false
     private var blockedUntil = 0L
 
@@ -60,8 +57,8 @@ object DebugLogRelay {
     fun setOn(ctx: Context, value: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("on", value).apply()
         on = value
-        LogBuffer.log(if (value) "debug log relay: on (encrypted log to the developer every $INTERVAL_SEC s)" else "debug log relay: off (turned off by the user)")
-        if (!value) exec.execute { pending.clear(); dropped = 0; cursor = LogBuffer.count() }
+        LogBuffer.log(if (value) "${DebugLogRelayCore.OWN} on (encrypted log to the developer every $INTERVAL_SEC s)" else "${DebugLogRelayCore.OWN} off (turned off by the user)")
+        if (!value) exec.execute { queue.reset(LogBuffer.count()) }
     }
 
     /** Called once from App.onCreate. */
@@ -72,7 +69,7 @@ object DebugLogRelay {
         app = ctx.applicationContext
         on = isOn(app)
         LogBuffer.log("debug build: log relay ${if (on) "on (encrypted log to the developer every $INTERVAL_SEC s; turn off in the bar at the top or in Settings)" else "off"}")
-        exec.scheduleWithFixedDelay({ runCatching { tick() }.onFailure { LogBuffer.log("debug log relay: ${it.javaClass.simpleName}: ${it.message}") } },
+        exec.scheduleWithFixedDelay({ runCatching { tick() }.onFailure { LogBuffer.log("${DebugLogRelayCore.OWN} ${it.javaClass.simpleName}: ${it.message}") } },
             INTERVAL_SEC, INTERVAL_SEC, TimeUnit.SECONDS)
     }
 
@@ -85,38 +82,28 @@ object DebugLogRelay {
     private fun installId(): String = prefs().getString("id", null) ?: java.util.UUID.randomUUID().toString().take(8).also { prefs().edit().putString("id", it).apply() }
 
     private fun tick() {
-        if (!on) { cursor = LogBuffer.count(); return }
-        val (fresh, next, lost) = LogBuffer.since(cursor)
-        cursor = next
-        if (lost > 0) dropped += lost
-        pending.addAll(fresh)
-        while (pending.size > MAX_PENDING) { pending.removeFirst(); dropped++ }
-        if (pending.isEmpty() && dropped == 0L) return
+        if (!on) { queue.reset(LogBuffer.count()); return }
+        val (fresh, next, lost) = LogBuffer.since(queue.cursor)
+        queue.take(fresh, next, lost)
         val now = System.currentTimeMillis()
         if (now < blockedUntil) return
         val b = budget().also { it.refill(now) }
-        val urgent = pending.any { DebugLogRelayCore.URGENT.containsMatchIn(it) }
-        val header = "gvpndroid ${BuildConfig.VERSION_NAME} · ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} · id ${installId()}" +
-            if (dropped > 0) " · $dropped lines not sent (log ring or relay buffer full)" else ""
-        val lines = pending.toList().ifEmpty { listOf("(no new lines)") }
-        for ((plain, n) in DebugLogRelayCore.pack(header, lines)) {
-            if (!b.canSend(urgent)) break
-            when (val code = post("gvpndroid log ${installId()} #${seq + 1}", DebugLogRelayCore.seal(plain, key!!))) {
-                in 200..299 -> {
-                    b.spend(); seq++; dropped = 0
-                    repeat(minOf(n, pending.size)) { pending.removeFirst() }
-                    if (failing) { failing = false; LogBuffer.log("debug log relay: sending works again") }
-                }
-                429 -> {
-                    b.exhausted(); blockedUntil = now + BACKOFF_429_MS
-                    LogBuffer.log("debug log relay: ntfy.sh refused (429, daily limit for this IP); trying again in 15 min")
-                    break
-                }
-                else -> {
-                    if (!failing) { failing = true; LogBuffer.log("debug log relay: sending failed (${if (code < 0) "no connection" else "HTTP $code"}); keeping the lines and trying again") }
-                    break
-                }
+        val header = "gvpndroid ${BuildConfig.VERSION_NAME} · ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} · id ${installId()}"
+        var lastCode = 0
+        val outcome = queue.flush(header, b) { plain, n ->
+            post("gvpndroid log ${installId()} #$n", DebugLogRelayCore.seal(plain, key!!)).also { lastCode = it }
+        }
+        when (outcome) {
+            DebugLogRelayCore.Outcome.SENT -> if (failing) { failing = false; LogBuffer.log("${DebugLogRelayCore.OWN} sending works again") }
+            DebugLogRelayCore.Outcome.LIMITED -> {
+                blockedUntil = now + BACKOFF_429_MS
+                LogBuffer.log("${DebugLogRelayCore.OWN} ntfy.sh refused (429, daily limit for this IP); trying again in 15 min")
             }
+            DebugLogRelayCore.Outcome.FAILED -> if (!failing) {
+                failing = true
+                LogBuffer.log("${DebugLogRelayCore.OWN} sending failed (${if (lastCode < 0) "no connection" else "HTTP $lastCode"}); keeping the lines and trying again")
+            }
+            else -> {}
         }
         save(b)
     }

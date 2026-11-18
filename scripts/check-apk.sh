@@ -42,6 +42,18 @@ for c in androidx/core/content/ContextCompat androidx/core/app/ActivityCompat; d
     echo "$defined" | grep -qF "'L$c;'" || err "class $c not defined in the APK"
 done
 
+# DEBUG ONLY (remove with the log relay): a debug build made where the relay's topic exists must
+# carry the relay and its splash notice; one without the topic must not show the notice.
+# grep -f reads the topic from its file, so it never appears on a command line.
+topicf=${GVPNDROID_SECRETS:-$HOME/.config/gvpndroid-secrets}/ntfy-topic
+if [ -f "$topicf" ] && [ "${RELAY:-1}" = 1 ]; then
+    grep -qaF -f "$topicf" "$tmp"/classes*.dex || err "debug log relay: topic not built in"
+    echo "$defined" | grep -qF "'Lorg/gnosisvpn/stub/DebugLogRelayCore;'" || err "debug log relay: DebugLogRelayCore missing"
+    echo "$listing" | grep -q 'splash_debug_notice.png' || err "debug log relay: splash notice missing"
+elif echo "$listing" | grep -q 'splash_debug_notice.png'; then
+    err "splash notice about the log relay, but the relay is not built in"
+fi
+
 perms=$("$bt/aapt2" dump permissions "$apk")
 for p in INTERNET ACCESS_NETWORK_STATE FOREGROUND_SERVICE FOREGROUND_SERVICE_SPECIAL_USE POST_NOTIFICATIONS CAMERA; do
     echo "$perms" | grep -q "android.permission.$p'" || err "permission $p missing"

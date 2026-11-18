@@ -261,8 +261,35 @@ class GnosisEngineTest {
         e.tick()
         assertEquals(Pause.RENEWFAIL, e.pause)
         val m = e.moments().first()
-        assertTrue(m.text, m.text.startsWith("Gnosis VPN keeps trying.")); assertFalse(m.text.contains("{retry}"))
-        assertEquals("Gnosis VPN keeps trying.", e.simpleLine(m).text)
+        assertEquals("Couldn’t pay for data.", m.lead)
+        assertTrue(m.text, m.text.startsWith("Your VPN balance may be too low. Gnosis VPN keeps trying.")); assertFalse(m.text.contains("{retry}"))
+        assertEquals(listOf("Add funds" to "addData"), m.btns)
+        assertEquals("Your VPN balance may be too low.", e.simpleLine(m).text)
+        assertEquals(listOf("Add funds" to "addData"), e.simpleLine(m).btns)
+    }
+
+    /** The phone on 2026-11-18: the PIX payment fails, the core reconnects, connects, fails again. */
+    @Test fun failedPaymentStaysVisibleThroughTheCoresReconnects() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, stalled = true, awaitingPayment = true, payment = T.Payment.FAILED)
+        e.tick(); assertEquals(Pause.RENEWFAIL, e.pause)
+        tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick()
+        assertEquals("still a payment problem, not a plain reconnect", Conn.PAUSED, e.conn); assertEquals(Pause.RENEWFAIL, e.pause)
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, payment = T.Payment.PENDING); e.tick()
+        assertEquals(Conn.PAUSED, e.conn)
+        assertEquals("Couldn’t pay for data; your balance may be too low. Traffic stays blocked.", e.ongoingNote()!!.body)
+        // a payment goes through: connected again
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 600_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED); e.tick()
+        assertEquals(Conn.CONNECTED, e.conn); assertNull(e.pause)
+    }
+
+    @Test fun startupShowsTheCoresIssueInsteadOfTheStep() {
+        val (tn, e, _) = setup()
+        tn.phase = "warmup"; tn.startup = T.Startup(5, 19, "Connecting to Gnosis Chain"); e.tick()
+        assertEquals("Connecting to Gnosis Chain", e.syncStep())
+        tn.startup = T.Startup(5, 19, "Connecting to Gnosis Chain", "Can’t reach Gnosis Chain. Check your internet connection; retrying."); e.tick()
+        assertEquals("Can’t reach Gnosis Chain. Check your internet connection; retrying.", e.syncStep())
     }
 
     @Test fun simpleViewKeepsWarningsAndLockdownText() {

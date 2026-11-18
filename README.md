@@ -3,7 +3,7 @@
 Android app for Gnosis VPN, the working basis for a production UI. The UI talks to one
 interface, `Tunnel`, with two backends:
 
-- **Gnosis VPN** (`GnosisTunnel`): the Gnosis VPN client core (Rust, v1.0.0) via JNI;
+- **Gnosis VPN** (`GnosisTunnel`): the Gnosis VPN client core (Rust, gnosis_vpn-client main 7d745df: 1.0.1, IPC v2) via JNI;
   WireGuard carried over a 1-hop HOPR session to an exit, with PIX payments. Tested on prod
   (piz-palu) in redroid and on a Pixel.
 - **Plain WireGuard** (`WireGuardTunnel`): the official prebuilt WireGuard library, for
@@ -38,7 +38,7 @@ App (`app/src/main/java/org/gnosisvpn/stub/`):
 Rust and build:
 
 - `rust/gnosis_vpn-android/`: the JNI bridge crate (plays the desktop root process for the
-  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client v1.0.0.
+  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client 7d745df (main after v1.0.0; `CLIENT_REV` in `scripts/do-build/run.sh`).
 - `scripts/do-build/`: builds on throwaway DigitalOcean droplets: the Rust core (`run.sh`) and the app (`app.sh`).
 - `scripts/gnosis-assets.sh`: copies the client package's data files into the APK's assets.
 - `scripts/build.sh`: memory-guarded build, lint, unit tests, then `scripts/check-apk.sh`
@@ -83,7 +83,7 @@ A fresh install sets up the Gnosis backend by itself (data files from the APK). 
 Android's Always-on VPN with "Block connections without VPN": the app cannot set it, so every
 Lockdown control opens `Settings.ACTION_VPN_SETTINGS` and reads the state on return.
 
-Tests: `GnosisLiveDataTest` checks the parsers against client v1.0.0's IPC types,
+Tests: `GnosisLiveDataTest` checks the parsers against client 7d745df's IPC v2 types,
 `GnosisEngineTest` drives the engine over a fake tunnel (gate, start-up, exits, sessions,
 renewals, balance levels, payments, pauses). `EngineTest` keeps the shared state machine on the
 prototype's rules with `DemoEngine`, the prototype's fake backend, which exists only in the
@@ -110,11 +110,15 @@ a private ntfy.sh topic. Anonymous ntfy.sh allows 250 messages a day per IP. A t
 about every 6–7 minutes, with the new lines collected in between. Lines that look like a problem
 (error, failed, stall, …) can use a reserve and go at once.
 
-- Code: `app/src/debug/java/.../DebugLogRelay.kt` and `DebugLogRelayCore.kt`, with the
-  `DEBUG ONLY` block in `app/build.gradle.kts`. Release builds do not contain it: they get the
+- Code: `app/src/debug/java/.../DebugLogRelay.kt` and `DebugLogRelayCore.kt`; the splash
+  notice in `app/src/debugRelay/res` (added only when the topic and key are present); the
+  `DEBUG ONLY` blocks in `app/build.gradle.kts` and `scripts/check-apk.sh`. Release builds do not contain it: they get the
   no-op `app/src/release/.../DebugLogRelay.kt`, which hides the bar and the setting.
 - Topic and public key: read at build time from `~/.config/gvpndroid-secrets/` (`ntfy-topic`,
   `log-x25519.pub`). Not in the repo. Without them the relay is off and hidden.
+- The app is excluded from its own VPN, so it posts from the device's own IP. The topic is in
+  every debug APK, including ones shared by link: whoever has the APK can see the messages' titles
+  and timing and post forged messages. The contents stay sealed. Rotate the topic if that matters.
 - Read the logs: `scripts/relay-read.py [SINCE]`, or `-f` to follow. It needs `log-x25519.key`
   from the same folder.
 - Removing it: delete those files and the `DEBUG ONLY` blocks, then delete the calls the compiler
@@ -221,7 +225,7 @@ client core (`GnosisTunnel`, WireGuard carried over a HOPR session). The Gnosis 
 when `no_backup/gnosis.properties` exists in the app's private storage.
 
 - `rust/gnosis_vpn-android`: JNI bridge, built as `libgnosisvpn.so` inside a
-  gnosis_vpn-client checkout (v1.0.0) with `rust/patches/0001-android-target.patch` applied.
+  gnosis_vpn-client checkout (7d745df) with `rust/patches/0001-android-target.patch` applied.
   It plays the desktop root process: the tun comes from `GnosisVpnService`, the kill switch is
   Android's Always-on VPN, in-tunnel pings are skipped (the app is excluded from its own VPN).
 - Device settings (outside the repo): `gnosis.properties` (`blokli_url`, `network`,

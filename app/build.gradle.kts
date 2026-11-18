@@ -23,8 +23,8 @@ android {
         applicationId = "org.gnosisvpn.stub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.5.0"
+        versionCode = 8
+        versionName = "0.5.1"
 
         // Phones: keep the prebuilt wireguard-go libraries for ARM, drop x86.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -42,6 +42,10 @@ android {
             buildConfigField("String", "DEBUG_LOG_PUBKEY", "\"$relayPubkey\"")
         }
     }
+
+    // DEBUG ONLY. REMOVE BEFORE PRODUCTION: the splash notice about the log relay (src/debugRelay)
+    // is added only when the relay is built in, so a debug APK never claims a relay it lacks.
+    if (relayTopic.isNotEmpty() && relayPubkey.isNotEmpty()) sourceSets["debug"].res.srcDir("src/debugRelay/res")
 
     testOptions {
         // The WireGuard config parser reads Build.VERSION; let android.jar stubs return defaults.

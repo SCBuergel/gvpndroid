@@ -81,4 +81,61 @@ class DebugLogRelayCoreTest {
         // a fresh ephemeral key every time
         assertFalse(sealed == DebugLogRelayCore.seal(msg, pub))
     }
+
+    private fun unzip(z: ByteArray) = GZIPInputStream(z.inputStream()).readBytes().toString(Charsets.UTF_8).trimEnd('\n').split('\n')
+
+    @Test fun queueSendsNewLinesOnceAndKeepsUnsentOnes() {
+        val q = DebugLogRelayCore.Queue()
+        val b = DebugLogRelayCore.Budget(tokens = 25.0, at = 1)
+        val got = mutableListOf<String>()
+        q.take(listOf("a", "b"), next = 2, lost = 0)
+        assertEquals(DebugLogRelayCore.Outcome.SENT, q.flush("h", b) { z, n -> assertEquals(1L, n); got += unzip(z).drop(1); 200 })
+        assertEquals(listOf("a", "b"), got); assertTrue(q.pending.isEmpty()); assertEquals(2L, q.cursor)
+        assertEquals(DebugLogRelayCore.Outcome.NOTHING, q.flush("h", b) { _, _ -> error("nothing to send") })
+        // no connection: the lines stay for the next tick
+        q.take(listOf("c"), next = 3, lost = 0)
+        assertEquals(DebugLogRelayCore.Outcome.FAILED, q.flush("h", b) { _, _ -> -1 })
+        assertEquals(listOf("c"), q.pending.toList())
+        assertEquals(DebugLogRelayCore.Outcome.SENT, q.flush("h", b) { z, n -> assertEquals(2L, n); got += unzip(z).drop(1); 200 })
+        assertEquals(listOf("a", "b", "c"), got)
+    }
+
+    @Test fun partialSendRemovesOnlyTheSentLines() {
+        val q = DebugLogRelayCore.Queue()
+        val rnd = java.util.Random(3)
+        val lines = (1..3000).map { "line $it ${rnd.nextLong()} ${rnd.nextLong()}" }
+        q.take(lines, next = 3000, lost = 0)
+        val b = DebugLogRelayCore.Budget(tokens = 10.0, at = 1)   // 2 above the reserve: two messages
+        val got = mutableListOf<String>()
+        assertEquals(DebugLogRelayCore.Outcome.SENT, q.flush("h", b) { z, _ -> got += unzip(z).drop(1); 200 })
+        assertEquals(2L, q.seq)
+        assertEquals(lines.take(got.size), got)
+        assertEquals(lines.drop(got.size), q.pending.toList())
+        assertEquals(DebugLogRelayCore.Outcome.BUDGET, q.flush("h", b) { _, _ -> error("over budget") })
+    }
+
+    @Test fun lossIsReportedOnceAnd429EmptiesTheBucket() {
+        val q = DebugLogRelayCore.Queue(maxPending = 3)
+        q.take(listOf("1", "2", "3", "4", "5"), next = 9, lost = 4)   // 4 lost in the ring, 2 over the cap
+        assertEquals(6L, q.dropped); assertEquals(listOf("3", "4", "5"), q.pending.toList())
+        val b = DebugLogRelayCore.Budget(tokens = 25.0, at = 1)
+        assertEquals(DebugLogRelayCore.Outcome.LIMITED, q.flush("h", b) { _, _ -> 429 })
+        assertFalse(b.canSend(urgent = true)); assertEquals(6L, q.dropped)
+        val b2 = DebugLogRelayCore.Budget(tokens = 25.0, at = 1)
+        val got = mutableListOf<String>()
+        q.flush("h", b2) { z, _ -> got += unzip(z).drop(1); 200 }
+        assertEquals(listOf("[6 lines were not sent: log ring or relay buffer full]", "3", "4", "5"), got)
+        assertEquals(0L, q.dropped)
+        q.take(listOf("x"), next = 10, lost = 0); q.reset(now = 12)
+        assertTrue(q.pending.isEmpty()); assertEquals(12L, q.cursor)
+    }
+
+    @Test fun theRelaysOwnFailuresAreNotUrgent() {
+        val q = DebugLogRelayCore.Queue()
+        q.take(listOf("10:00:00  ${DebugLogRelayCore.OWN} sending failed (no connection); keeping the lines"), next = 1, lost = 0)
+        val low = DebugLogRelayCore.Budget(tokens = 5.0, at = 1)   // only the reserve left
+        assertEquals(DebugLogRelayCore.Outcome.BUDGET, q.flush("h", low) { _, _ -> 200 })
+        q.take(listOf("10:00:01  core ERROR connect failed"), next = 2, lost = 0)
+        assertEquals(DebugLogRelayCore.Outcome.SENT, q.flush("h", low) { _, _ -> 200 })
+    }
 }
