@@ -353,7 +353,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override fun serverLoad(e: Exit): Int? = e.load?.let { (it * 100).roundToInt().coerceIn(0, 999) }
         ?: if (e.slots > 0) ((1 - e.spots.toDouble() / e.slots) * 100).roundToInt() else null
 
-    override fun syncStep(): String? = tunnel().startup?.name ?: "Determining available routes"
+    override fun syncStep(): String? = tunnel().startup?.let { it.error ?: it.name } ?: "Determining available routes"
     override fun syncLen() = Double.MAX_VALUE
     override fun syncProgress(): Float {
         val s = tunnel().startup ?: return if (tunnel().phase == "running") 0.97f else 0.02f

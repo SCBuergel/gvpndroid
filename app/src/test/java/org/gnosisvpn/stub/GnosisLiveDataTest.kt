@@ -83,9 +83,13 @@ class GnosisLiveDataTest {
     }
 
     @Test fun startupSteps() {
-        val w = GnosisProtocol.startup(JSONObject("""{"run_mode":{"type":"warmup","stage":{"type":"connecting_blockchain"},"last_error":null}}"""))!!
+        val w = GnosisProtocol.startup(JSONObject("""{"run_mode":{"type":"warmup","stage":{"type":"connecting_blockchain"},"issue":null}}"""))!!
         assertEquals("Connecting to Gnosis Chain", w.name); assertNull(w.error)
-        val later = GnosisProtocol.startup(JSONObject("""{"run_mode":{"type":"warmup","stage":{"type":"announcing_node"},"last_error":null}}"""))!!
+        val stuck = GnosisProtocol.startup(JSONObject("""{"run_mode":{"type":"warmup","stage":{"type":"connecting_blockchain"},
+            "issue":{"kind":{"type":"unreachable"},"message":"dns error: failed to lookup address","since":1794944505000}}}"""))!!
+        assertEquals("Can’t reach Gnosis Chain. Check your internet connection; retrying.", stuck.error)
+        assertEquals("Start-up problem: boom. Retrying.", GnosisProtocol.issue(JSONObject("""{"kind":{"type":"other"},"message":"boom","since":1}""")))
+        val later = GnosisProtocol.startup(JSONObject("""{"run_mode":{"type":"warmup","stage":{"type":"announcing_node"},"issue":null}}"""))!!
         assertTrue(later.step > w.step)
         assertNull(GnosisProtocol.startup(JSONObject("""{"run_mode":{"type":"preparing_safe"}}""")))
         assertEquals("Your node stopped", GnosisProtocol.failure(JSONObject("""{"run_mode":{"type":"running","hopr_status":{"type":"failed"}}}""")))

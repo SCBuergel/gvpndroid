@@ -1,5 +1,6 @@
 package org.gnosisvpn.stub.ui
 
+import org.gnosisvpn.stub.DebugLogRelay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -240,7 +241,7 @@ private fun RowStats(eng: Engine, e: Exit) {
 /* ---------- S19n, S06n: settings ---------- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsPage(eng: Engine, act: Act, debug: Boolean, extra: SettingsExtra) {
+fun SettingsPage(eng: Engine, act: Act, debug: Boolean, extra: SettingsExtra, ui: UiState) {
     val p = LocalPal.current
     Column(Modifier.fillMaxSize().background(p.bg)) {
         AppBar("Settings", { act.go("back") })
@@ -249,7 +250,7 @@ fun SettingsPage(eng: Engine, act: Act, debug: Boolean, extra: SettingsExtra) {
             tabs.forEach { (v, l) -> Tab(selected = eng.stab == v, onClick = { act.go("tab", "v" to v) }, text = { Text(l, fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }, selectedContentColor = p.primaryT, unselectedContentColor = p.onV) }
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Pad { if (eng.stab == "general") SettingsGeneral(eng, act, debug, extra) else SettingsUsage(eng, act) }
+            Pad { if (eng.stab == "general") SettingsGeneral(eng, act, debug, extra, ui) else SettingsUsage(eng, act) }
         }
     }
 }
@@ -258,7 +259,7 @@ fun SettingsPage(eng: Engine, act: Act, debug: Boolean, extra: SettingsExtra) {
 class SettingsExtra(val rows: List<Triple<String, String, String>> = emptyList(), val version: String = "", val onRow: (String) -> Unit = {})
 
 @Composable
-private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: SettingsExtra) {
+private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: SettingsExtra, ui: UiState) {
     val p = LocalPal.current
     val lockSub = if (eng.ldOffPay) "Off since you paid · Android VPN settings" else if (eng.lockdown) "On · Block connections without VPN" else "Off · traffic goes direct when the VPN is off"
     Text("Protection", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
@@ -302,6 +303,12 @@ private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: Settin
     ListGroup {
         Li("Export logs", "Saved to a folder you pick.", "download") { Btn(BK.TEXT, "Export", { act.go("logsExport") }, size = BS.SM) }
         if (eng.canUploadLogs) Li("Upload logs", "Sent to support. Check what’s included first.", "upload", divider = true) { Btn(BK.TEXT, "Upload", { act.go("ui:upload") }, size = BS.SM) }
+        // DEBUG ONLY. REMOVE BEFORE PRODUCTION: the developer log relay (DebugLogRelay).
+        if (DebugLogRelay.available) {
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val flip = { ui.logRelayOn = !ui.logRelayOn; DebugLogRelay.setOn(ctx, ui.logRelayOn) }
+            Li("Send log to the developer", "Debug builds only. Every ${DebugLogRelay.INTERVAL_SEC} s, encrypted, to the developer’s relay. On by default.", "bug_report", flip, divider = true) { Sw(ui.logRelayOn, flip) }
+        }
     }
     if (extra.rows.isNotEmpty()) {
         Text("Node", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))

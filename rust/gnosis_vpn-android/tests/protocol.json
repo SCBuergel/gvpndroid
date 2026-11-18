@@ -178,7 +178,7 @@
     "node_xdai": "0",
     "node_wxhopr": "0",
     "funding_tool": null,
-    "error": null,
+    "issue": null,
     "balance_recommendation": {
      "wxhopr": "225350000002225467152",
      "xdai": "5000000000000000",
@@ -237,5 +237,54 @@
    ]
   ],
   "funding_need": "225.350000002225467152 wxHOPR + 0.005 xDAI"
+ },
+ "status_warmup_issue": {
+  "type": "status",
+  "data": {
+   "run_mode": {
+    "type": "warmup",
+    "stage": {
+     "type": "connecting_blockchain"
+    },
+    "issue": {
+     "kind": {
+      "type": "unreachable"
+     },
+     "message": "dns error: failed to lookup address information",
+     "since": 1794944505000
+    }
+   },
+   "destinations": [],
+   "target": null,
+   "connection": {
+    "type": "disconnected"
+   },
+   "disconnecting": [],
+   "probe": null,
+   "pix_chunk_bytes": 660160512,
+   "probing": {
+    "level": {
+     "type": "high"
+    },
+    "reason": {
+     "type": "not_ready",
+     "held_for": 202
+    },
+    "focus": [
+     "gvpn-fra-1-xp4e",
+     "gvpn-ger-1-j9os",
+     "gvpn-rs-1-0ax9",
+     "gvpn-por-1-sfiy",
+     "isambard-kingdom-brunel-r6ag",
+     "gvpn-lt-1-ynm1",
+     "bonnie-prince-charlie-cp8u",
+     "gvpn-kenya-1-tzm3"
+    ]
+   },
+   "recent": [
+    "gvpn-fra-1-xp4e",
+    "gvpn-ger-1-j9os"
+   ]
+  }
  }
 }

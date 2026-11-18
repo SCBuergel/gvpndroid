@@ -1,14 +1,14 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index b6351f1c..92ce003d 100644
+index 1a3d6e3..2a552ea 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -4426,6 +4426,22 @@ dependencies = [
+@@ -4430,6 +4430,22 @@ dependencies = [
   "wasm-bindgen",
  ]
  
 +[[package]]
 +name = "gnosis_vpn-android"
-+version = "1.0.0"
++version = "1.0.1"
 +dependencies = [
 + "gnosis_vpn-ipc",
 + "gnosis_vpn-lib",
@@ -24,9 +24,9 @@ index b6351f1c..92ce003d 100644
 +
  [[package]]
  name = "gnosis_vpn-ctl"
- version = "1.0.0"
+ version = "1.0.1"
 diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
-index 07469a31..84217fe6 100644
+index 07469a3..84217fe 100644
 --- a/gnosis_vpn-ipc/src/dirs.rs
 +++ b/gnosis_vpn-ipc/src/dirs.rs
 @@ -12,7 +12,7 @@ pub struct UserDirs {
@@ -39,7 +39,7 @@ index 07469a31..84217fe6 100644
      UserDirs {
          data: home.join(".local/share/gnosisvpn"),
 diff --git a/gnosis_vpn-ipc/src/socket.rs b/gnosis_vpn-ipc/src/socket.rs
-index 86d42480..b98cf8f4 100644
+index 86d4248..b98cf8f 100644
 --- a/gnosis_vpn-ipc/src/socket.rs
 +++ b/gnosis_vpn-ipc/src/socket.rs
 @@ -7,7 +7,7 @@ use std::time::Duration;
@@ -52,7 +52,7 @@ index 86d42480..b98cf8f4 100644
  /// macOS keeps the flat `/var/run` name next to the pid file newsyslog reads.
  #[cfg(target_os = "macos")]
 diff --git a/gnosis_vpn-lib/src/app_nap.rs b/gnosis_vpn-lib/src/app_nap.rs
-index a8f5221e..7b0b1085 100644
+index a8f5221..7b0b108 100644
 --- a/gnosis_vpn-lib/src/app_nap.rs
 +++ b/gnosis_vpn-lib/src/app_nap.rs
 @@ -36,7 +36,7 @@ mod macos {
@@ -74,7 +74,7 @@ index a8f5221e..7b0b1085 100644
  
  #[cfg(test)]
 diff --git a/gnosis_vpn-lib/src/dirs.rs b/gnosis_vpn-lib/src/dirs.rs
-index d13c9dfb..4f550d7e 100644
+index d13c9df..4f550d7 100644
 --- a/gnosis_vpn-lib/src/dirs.rs
 +++ b/gnosis_vpn-lib/src/dirs.rs
 @@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
@@ -87,7 +87,7 @@ index d13c9dfb..4f550d7e 100644
  #[cfg(target_os = "macos")]
  pub const RUNTIME_DIR: &str = "/var/run/gnosisvpn";
 diff --git a/gnosis_vpn-lib/src/geoip.rs b/gnosis_vpn-lib/src/geoip.rs
-index 4238698a..96b33559 100644
+index 4238698..96b3355 100644
 --- a/gnosis_vpn-lib/src/geoip.rs
 +++ b/gnosis_vpn-lib/src/geoip.rs
 @@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr};
@@ -100,7 +100,7 @@ index 4238698a..96b33559 100644
  #[cfg(target_os = "macos")]
  pub const DEFAULT_DB_PATH: &str = "/usr/local/share/gnosisvpn/geoip.mmdb";
 diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
-index ec444bdb..eb9c4e08 100644
+index ec444bd..eb9c4e0 100644
 --- a/gnosis_vpn-lib/src/hopr/pix_config.rs
 +++ b/gnosis_vpn-lib/src/hopr/pix_config.rs
 @@ -7,7 +7,7 @@ use serde_with::{DisplayFromStr, serde_as};
@@ -114,7 +114,7 @@ index ec444bdb..eb9c4e08 100644
  pub const DEFAULT_CURVY_ZK_DIR: &str = "/usr/local/share/gnosisvpn/curvy-zk";
 diff --git a/gnosis_vpn-lib/src/killswitch/android.rs b/gnosis_vpn-lib/src/killswitch/android.rs
 new file mode 100644
-index 00000000..1c830ca9
+index 0000000..1c830ca
 --- /dev/null
 +++ b/gnosis_vpn-lib/src/killswitch/android.rs
 @@ -0,0 +1,40 @@
@@ -159,7 +159,7 @@ index 00000000..1c830ca9
 +    }
 +}
 diff --git a/gnosis_vpn-lib/src/killswitch/mod.rs b/gnosis_vpn-lib/src/killswitch/mod.rs
-index 9cf29b2b..f6ec71d1 100644
+index 9cf29b2..f6ec71d 100644
 --- a/gnosis_vpn-lib/src/killswitch/mod.rs
 +++ b/gnosis_vpn-lib/src/killswitch/mod.rs
 @@ -34,5 +34,8 @@ cfg_if::cfg_if! {
@@ -172,7 +172,7 @@ index 9cf29b2b..f6ec71d1 100644
      }
  }
 diff --git a/gnosis_vpn-lib/src/ping.rs b/gnosis_vpn-lib/src/ping.rs
-index 4fcd7274..88488f6c 100644
+index 4fcd727..88488f6 100644
 --- a/gnosis_vpn-lib/src/ping.rs
 +++ b/gnosis_vpn-lib/src/ping.rs
 @@ -56,7 +56,7 @@ async fn ping_using_cmd(opts: &Options) -> Result<Duration, Error> {
@@ -194,7 +194,7 @@ index 4fcd7274..88488f6c 100644
              let socket_type = ping::SocketType::DGRAM;
          }
 diff --git a/gnosis_vpn-lib/src/socket/fd_passing.rs b/gnosis_vpn-lib/src/socket/fd_passing.rs
-index 07e900c0..750b382c 100644
+index 07e900c..750b382 100644
 --- a/gnosis_vpn-lib/src/socket/fd_passing.rs
 +++ b/gnosis_vpn-lib/src/socket/fd_passing.rs
 @@ -185,7 +185,7 @@ fn socket_type_name(socket_type: rustix::net::SocketType) -> &'static str {
@@ -216,7 +216,7 @@ index 07e900c0..750b382c 100644
      Ok(()) // already atomic via MSG_CMSG_CLOEXEC
  }
 diff --git a/gnosis_vpn-lib/src/wg_tunnel/tun.rs b/gnosis_vpn-lib/src/wg_tunnel/tun.rs
-index 08a137d2..255b4ab6 100644
+index 08a137d..255b4ab 100644
 --- a/gnosis_vpn-lib/src/wg_tunnel/tun.rs
 +++ b/gnosis_vpn-lib/src/wg_tunnel/tun.rs
 @@ -29,7 +29,7 @@ use super::{TunReceiver, TunSender};

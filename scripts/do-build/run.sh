@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 REPO=$(pwd)
 SIZE=${SIZE:-c-32}; REGION=${REGION:-ams3}; PROFILE=${PROFILE:-fast}; ABIS=${ABIS:-arm64-v8a x86_64}
-CLIENT_REV=${CLIENT_REV:-v1.0.0}; DEADLINE_S=${DEADLINE_S:-21600}
+CLIENT_REV=${CLIENT_REV:-7d745df}; DEADLINE_S=${DEADLINE_S:-21600}
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
 ST=$HOME/.local/state/gvpndroid-do; mkdir -p "$ST"; chmod 700 "$ST"
 NAME=gvpndroid-build-$(date +%s)

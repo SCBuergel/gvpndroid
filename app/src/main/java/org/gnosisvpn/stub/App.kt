@@ -59,7 +59,10 @@ class App : Application() {
 
     val ui: org.gnosisvpn.stub.ui.UiState by lazy {
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)
-        org.gnosisvpn.stub.ui.UiState(prefs.getString("mode", "system") ?: "system") { prefs.edit().putString("mode", it).apply() }
+        org.gnosisvpn.stub.ui.UiState(prefs.getString("mode", "system") ?: "system") { prefs.edit().putString("mode", it).apply() }.also {
+            // DEBUG ONLY. REMOVE BEFORE PRODUCTION (developer log relay).
+            it.logRelayOn = DebugLogRelay.available && DebugLogRelay.isOn(this)
+        }
     }
     /** The visible UI activity, for hooks that need one (file picker, share sheet). */
     var activity: org.gnosisvpn.stub.ui.UiActivity? = null
@@ -72,6 +75,9 @@ class App : Application() {
         instance = this
         org.gnosisvpn.stub.ui.Notifier.channels(this)
         installCrashRecorder()
+        // DEBUG ONLY. REMOVE BEFORE PRODUCTION: encrypted log to the developer every 10 s, on by
+        // default and switchable. It is real only in debug builds; release builds get a no-op stub.
+        DebugLogRelay.start(this)
         store = ConfigStore(this)
         selectBackend()
 

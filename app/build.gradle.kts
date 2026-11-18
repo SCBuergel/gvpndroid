@@ -4,6 +4,17 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---- DEBUG ONLY. REMOVE BEFORE PRODUCTION: the developer log relay (app/src/debug/.../DebugLogRelay.kt).
+// The ntfy.sh topic and the developer's X25519 public key are read at build time from
+// $GVPNDROID_SECRETS (default ~/.config/gvpndroid-secrets: ntfy-topic, log-x25519.pub) and baked
+// into debug builds only. They are not in the repository. Without the files the relay is off and hidden.
+val relaySecrets = File(System.getenv("GVPNDROID_SECRETS") ?: "${System.getProperty("user.home")}/.config/gvpndroid-secrets")
+fun relaySecret(name: String, ok: Regex): String =
+    File(relaySecrets, name).takeIf { it.isFile }?.readText()?.trim()?.takeIf { ok.matches(it) } ?: ""
+val relayTopic = relaySecret("ntfy-topic", Regex("[A-Za-z0-9_-]{16,64}"))
+val relayPubkey = relaySecret("log-x25519.pub", Regex("[A-Za-z0-9+/]{43}="))
+// ---- end DEBUG ONLY
+
 android {
     namespace = "org.gnosisvpn.stub"
     compileSdk = 35
@@ -12,8 +23,8 @@ android {
         applicationId = "org.gnosisvpn.stub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.4.0"
+        versionCode = 7
+        versionName = "0.5.0"
 
         // Phones: keep the prebuilt wireguard-go libraries for ARM, drop x86.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
@@ -26,6 +37,9 @@ android {
             // so the same debug APK works on the phone and in the container. No 32-bit x86.
             // -PphoneOnly leaves x86_64 out (smaller APK to download onto a phone).
             if (!project.hasProperty("phoneOnly")) ndk { abiFilters += "x86_64" }
+            // DEBUG ONLY. REMOVE BEFORE PRODUCTION: developer log relay settings (see the top of this file).
+            buildConfigField("String", "DEBUG_LOG_TOPIC", "\"$relayTopic\"")
+            buildConfigField("String", "DEBUG_LOG_PUBKEY", "\"$relayPubkey\"")
         }
     }
 
@@ -34,7 +48,7 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -70,6 +84,10 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     // The "Discovering the network" animation (the demo's Lottie file).
     implementation("com.airbnb.android:lottie-compose:6.6.2")
+
+    // DEBUG ONLY. REMOVE BEFORE PRODUCTION: X25519 + ChaCha20-Poly1305 for the developer log relay
+    // (Android has X25519 only from API 33). debugImplementation: release builds do not get it.
+    debugImplementation("org.bouncycastle:bcprov-jdk18on:1.77")
 
     testImplementation("junit:junit:4.13.2")
     // Real org.json for unit tests (android.jar's is a stub that returns defaults).

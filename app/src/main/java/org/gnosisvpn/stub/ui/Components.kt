@@ -98,7 +98,7 @@ fun icon(name: String, fill: Boolean = false): ImageVector = if (fill) when (nam
     "tune" -> Icons.Outlined.Tune; "qr_code_2" -> Icons.Outlined.QrCode2; "data_alert" -> Icons.Outlined.DataUsage; "error" -> Icons.Outlined.ErrorOutline
     "block" -> Icons.Outlined.Block; "search_off" -> Icons.Outlined.SearchOff; "south" -> Icons.Outlined.South; "north" -> Icons.Outlined.North
     "vpn_key" -> Icons.Outlined.VpnKey; "arrow_forward" -> Icons.AutoMirrored.Outlined.ArrowForward; "refresh" -> Icons.Outlined.Refresh
-    "developer_mode" -> Icons.Outlined.DeveloperMode; "badge" -> Icons.Outlined.Badge
+    "developer_mode" -> Icons.Outlined.DeveloperMode; "badge" -> Icons.Outlined.Badge; "bug_report" -> Icons.Outlined.BugReport
     else -> Icons.Outlined.Info
 }
 

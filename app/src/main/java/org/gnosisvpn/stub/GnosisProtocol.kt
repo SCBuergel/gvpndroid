@@ -136,8 +136,21 @@ object GnosisProtocol {
             else -> t
         }
         val i = STARTUP.indexOfFirst { it.first == key }.coerceAtLeast(0)
-        val err = (mode.optString("last_error").takeIf { it.isNotEmpty() && it != "null" })
-        return Tunnel.Startup(i, STARTUP.size, STARTUP[i].second, err)
+        return Tunnel.Startup(i, STARTUP.size, STARTUP[i].second, issue(mode.optJSONObject("issue")))
+    }
+
+    /**
+     * A start-up step that keeps failing (IPC v2 StartupIssue: kind, message, since), said for
+     * people; null when there is none. The core keeps retrying by itself.
+     */
+    fun issue(o: JSONObject?): String? {
+        o ?: return null
+        return when (o.optJSONObject("kind")?.optString("type")) {
+            "unreachable" -> "Can’t reach Gnosis Chain. Check your internet connection; retrying."
+            "service_unavailable" -> "The Gnosis Chain service is busy. Retrying."
+            "incompatible" -> "This version of Gnosis VPN needs an update."
+            else -> o.optString("message").takeIf { it.isNotEmpty() }?.let { "Start-up problem: $it. Retrying." } ?: "Start-up problem. Retrying."
+        }
     }
 
     /** A failure the core reports while running (the node failed), or null. */

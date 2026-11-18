@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DEBUG ONLY. REMOVE BEFORE PRODUCTION: the system splash screen (Android 12+) of debug builds
+     says that the log goes to the developer (DebugLogRelay). Same theme as main, plus the notice. -->
+<resources>
+    <style name="Theme.Gnosis" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash_debug_notice</item>
+    </style>
+</resources>

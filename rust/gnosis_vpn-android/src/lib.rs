@@ -29,7 +29,7 @@ use gnosis_vpn_lib::command::WorkerCommand;
 use gnosis_vpn_lib::core::Core;
 use gnosis_vpn_lib::event::{CoreToWorker, RequestToRoot, ResponseFromRoot, WorkerToCore};
 use gnosis_vpn_lib::socket;
-use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, WorkerParams};
+use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, SpawnParams, WorkerParams};
 use jni_sys::{jclass, jint, jlong, jstring, JNIEnv};
 use serde_json::json;
 use tokio::runtime::Runtime;
@@ -245,7 +245,7 @@ fn handle_request(request: RequestToRoot) {
             tracing::info!("kill switch: no-op on Android (use Always-on VPN)");
             respond(ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
         }
-        RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips } => push_event(json!({
+        RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, .. } => push_event(json!({
             "type": "setup_tunnel",
             "request_id": request_id,
             "address": interface_address,
@@ -321,7 +321,11 @@ fn prepare_and_spawn(
         })
         .ok_or_else(|| format!("{host} has no IPv4 address"))?;
     let dirs = UserDirs { data: data.clone(), cache, logs: data.join("logs") };
-    let params = WorkerParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, blokli_ip, dirs, network);
+    // The app passes the network name (it keys the identity, Safe cache and PIX state
+    // directories), so the node identity never moves. The desktop worker asks Blokli for it
+    // instead (SpawnParams::query_network); the app's name is the one the identity was made under.
+    let spawn = SpawnParams::new(ConfigFileMode::Generated, AllowFlags::default(), blokli_url, Some(blokli_ip), dirs);
+    let params = WorkerParams::new(spawn, blokli_ip, network).map_err(|e| format!("network: {e}"))?;
     params.ensure_dirs().map_err(|e| format!("state dirs: {e}"))?;
 
     if TUN_SOCKET.get().is_none() {
@@ -536,7 +540,7 @@ mod tests {
     #[test]
     fn status_samples_are_responses() {
         let f = fixture();
-        for key in ["status_running", "status_preparing_safe"] {
+        for key in ["status_running", "status_preparing_safe", "status_warmup_issue"] {
             let parsed: Result<Response, _> = serde_json::from_value(f[key].clone());
             assert!(parsed.is_ok(), "{key} is not a Response: {parsed:?}");
             // Round trip: what the bridge sends Kotlin keeps the fields the app reads.
@@ -544,6 +548,10 @@ mod tests {
             assert_eq!(back["type"], "status");
             assert!(back["data"]["run_mode"]["type"].is_string());
         }
+        // GnosisProtocol.issue reads run_mode.issue.kind.type and .message (IPC v2 StartupIssue).
+        let w = serde_json::to_value(serde_json::from_value::<Response>(f["status_warmup_issue"].clone()).unwrap()).unwrap();
+        assert_eq!(w["data"]["run_mode"]["issue"]["kind"]["type"], "unreachable");
+        assert!(w["data"]["run_mode"]["issue"]["message"].is_string());
     }
 
     /// A rejected command must not echo its text (funding commands carry a secret).

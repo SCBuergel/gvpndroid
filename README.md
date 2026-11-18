@@ -39,7 +39,7 @@ Rust and build:
 
 - `rust/gnosis_vpn-android/`: the JNI bridge crate (plays the desktop root process for the
   core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client v1.0.0.
-- `scripts/do-build/`: builds the Rust core on a throwaway DigitalOcean droplet.
+- `scripts/do-build/`: builds on throwaway DigitalOcean droplets: the Rust core (`run.sh`) and the app (`app.sh`).
 - `scripts/gnosis-assets.sh`: copies the client package's data files into the APK's assets.
 - `scripts/build.sh`: memory-guarded build, lint, unit tests, then `scripts/check-apk.sh`
   (native libs incl. the Rust core, data files, 16 KB alignment, permissions, no secrets).
@@ -98,6 +98,27 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
 
 Building with redroid running leaves too little memory on this machine: stop it
 (`scripts/emulator.sh stop`) for the build, start it again to test.
+
+## Developer log relay (DEBUG BUILDS ONLY, remove before production)
+
+Debug builds send the app's log (app and core lines) to the developer every 10 s. It is
+**on by default**. A bar at the top of every screen says so and has an off switch. The same
+switch is in Settings → Logs. The parts are gzip'd and sealed to the developer's X25519 key, with
+the same construction as gvpndows' identity backup but the tag `gvpndroid-log-v1`, then posted to
+a private ntfy.sh topic. Anonymous ntfy.sh allows 250 messages a day per IP. A token bucket
+(25 messages, refilled at 220 a day) therefore sends every 10 s for the first few minutes, then
+about every 6–7 minutes, with the new lines collected in between. Lines that look like a problem
+(error, failed, stall, …) can use a reserve and go at once.
+
+- Code: `app/src/debug/java/.../DebugLogRelay.kt` and `DebugLogRelayCore.kt`, with the
+  `DEBUG ONLY` block in `app/build.gradle.kts`. Release builds do not contain it: they get the
+  no-op `app/src/release/.../DebugLogRelay.kt`, which hides the bar and the setting.
+- Topic and public key: read at build time from `~/.config/gvpndroid-secrets/` (`ntfy-topic`,
+  `log-x25519.pub`). Not in the repo. Without them the relay is off and hidden.
+- Read the logs: `scripts/relay-read.py [SINCE]`, or `-f` to follow. It needs `log-x25519.key`
+  from the same folder.
+- Removing it: delete those files and the `DEBUG ONLY` blocks, then delete the calls the compiler
+  reports.
 
 ## Config
 
@@ -222,6 +243,7 @@ In the app: "Use Gnosis VPN", then Connect. Disconnect before installing an upda
     scripts/do-build/run.sh                      # both ABIs, fast profile, about 9 min
     ABIS=arm64-v8a scripts/do-build/run.sh       # phone only
     KEEP=1 scripts/do-build/run.sh               # keep the droplet: rebuild.sh, then down.sh
+    scripts/do-build/app.sh                      # the APK: assemble, lint, unit tests on a droplet (~15 min, 1 h deadline)
 
 Every build first runs the crate's contract tests (`cargo test -p gnosis_vpn-android`, host
 target, part of `build-remote.sh`; `TESTS=0` skips them); a failing test stops the build. Rebuild after every change under `rust/`: the libraries in `jniLibs/` are not tracked.

@@ -9,6 +9,11 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import org.gnosisvpn.stub.DebugLogRelay
 
 /** UI-only state the engine does not need to know (U in the prototype). */
 class UiState(initialMode: String, private val saveMode: (String) -> Unit) {
@@ -41,6 +47,8 @@ class UiState(initialMode: String, private val saveMode: (String) -> Unit) {
     var vizMb by mutableStateOf(false)
     var snack by mutableStateOf<String?>(null)
     var snackSeq by mutableIntStateOf(0)
+    /** DEBUG ONLY. REMOVE BEFORE PRODUCTION: whether the developer log relay is on (DebugLogRelay). */
+    var logRelayOn by mutableStateOf(false)
     fun changeMode(m: String) { mode = m; saveMode(m) }
     fun showSnack(msg: String) { snack = msg; snackSeq++ }
 }
@@ -70,7 +78,10 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
     val viz = remember { Viz() }
     GnosisTheme(ui.mode) {
         val p = LocalPal.current
-        Box(Modifier.fillMaxSize().background(p.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
+        Column(Modifier.fillMaxSize().background(p.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
+        // DEBUG ONLY. REMOVE BEFORE PRODUCTION: says on every screen that the log goes to the developer.
+        if (DebugLogRelay.available) DebugLogBar(ui)
+        Box(Modifier.weight(1f).fillMaxWidth()) {
             val base = when { eng.fail != null -> "fail"; eng.gate -> "gate"; eng.syncT != null -> "sync"; else -> "home" }
             AnimatedContent(base, transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(150)) }, label = "base") { b ->
                 when (b) {
@@ -89,7 +100,7 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
                 when (pgx) {
                     null -> Box(Modifier)
                     "pick" -> PickPage(eng, act)
-                    "settings" -> SettingsPage(eng, act, debug, extra)
+                    "settings" -> SettingsPage(eng, act, debug, extra, ui)
                     "add" -> AddPage(eng, act)
                     "payout" -> PayOutPage(eng, act)
                     "traffic" -> { LaunchedEffect(Unit) { viz.eps.clear(); viz.c = null; viz.dpk = 0.0; viz.upk = 0.0 }; TrafficPage(eng, act, viz, ui.vizMb) { ui.vizMb = !ui.vizMb } }
@@ -104,6 +115,27 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
             if (ui.codes) CodeBadge(eng, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             Box(Modifier.testTag("screen-code:${eng.screenCode().first}"))
         }
+        }
         BackHandler(enabled = canGoBack(eng, ui)) { goBack(eng, ui) }
+    }
+}
+
+/**
+ * DEBUG ONLY. REMOVE BEFORE PRODUCTION. Debug builds send their log to the developer (encrypted,
+ * every 10 s, on by default). This bar says so on every screen, from the first one, and turns it off.
+ */
+@Composable
+private fun DebugLogBar(ui: UiState) {
+    val p = LocalPal.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val set = { v: Boolean -> ui.logRelayOn = v; DebugLogRelay.setOn(ctx, v) }
+    Row(Modifier.fillMaxWidth().background(if (ui.logRelayOn) p.lavc else p.sc).clickable { set(!ui.logRelayOn) }
+        .padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp).testTag("debug-log-bar"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Ms("bug_report", size = 18.dp, tint = p.on)
+        Text(if (ui.logRelayOn) "Debug build: your log goes to the developer every ${DebugLogRelay.INTERVAL_SEC} s (encrypted). On by default."
+             else "Debug build: log sending to the developer is off.",
+            style = T.bs, color = p.on, modifier = Modifier.weight(1f))
+        Sw(ui.logRelayOn, { set(!ui.logRelayOn) })
     }
 }
