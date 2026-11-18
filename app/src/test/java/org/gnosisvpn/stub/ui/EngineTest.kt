@@ -33,9 +33,7 @@ class EngineTest {
     @Test fun firstLaunchIsTheFundingGate() {
         val e = DemoEngine(); e.start()
         assertEquals("I-1", e.screenCode().first)
-        e.act("gateDirect")
-        assertEquals("I-1d", e.screenCode().first)
-        e.act("back"); assertEquals("I-1w", e.screenCode().first)
+        e.act("gateFund"); assertEquals("I-1w", e.screenCode().first)
         e.act("gatePaid")
         assertEquals("I0", e.screenCode().first)
         assertEquals(PAY, e.balance, 0.0)
@@ -143,14 +141,12 @@ class FakeTunnel : org.gnosisvpn.stub.Tunnel {
     override var wallet: org.gnosisvpn.stub.Tunnel.Wallet? = null
     var counters: org.gnosisvpn.stub.Tunnel.Stats? = null
     val selected = mutableListOf<String>()
-    var redeemed: String? = null
     override fun connect() { state = org.gnosisvpn.stub.Tunnel.State.CONNECTING }
     override fun disconnect() { state = org.gnosisvpn.stub.Tunnel.State.DISCONNECTED }
     override fun stats() = counters
     override fun addListener(listener: org.gnosisvpn.stub.Tunnel.Listener) {}
     override fun removeListener(listener: org.gnosisvpn.stub.Tunnel.Listener) {}
     override fun selectLocation(location: org.gnosisvpn.stub.Tunnel.Location) { selected += location.id }
-    override fun redeemCode(code: String, done: (ok: Boolean, message: String) -> Unit) { redeemed = code; done(true, "Code sent.") }
 }
 
 class GnosisEngineTest {
@@ -178,12 +174,13 @@ class GnosisEngineTest {
 
     @Test fun fundingGateThenStartupThenRunning() {
         val (tn, e, h) = setup()
-        tn.fundingRequest = org.gnosisvpn.stub.Tunnel.FundingRequest("0xf9f8a1C7", "225.35 wxHOPR + 0.005 xDAI"); tn.phase = "preparing_safe"
+        tn.fundingRequest = org.gnosisvpn.stub.Tunnel.FundingRequest("0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072", "225.35 wxHOPR + 0.005 xDAI"); tn.phase = "preparing_safe"
         e.tick()
         assertEquals("I-1", e.screenCode().first)
-        assertEquals("0xf9f8a1C7", e.address())
+        assertEquals("0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072", e.address())
         assertEquals("225.35", e.fundingNeeds()[0].third); assertEquals("0.005", e.fundingNeeds()[1].third)
-        e.act("redeem", mapOf("v" to "CODE-1")); assertEquals("CODE-1", tn.redeemed); assertEquals("I-1w", e.screenCode().first)
+        assertEquals("https://gnosisscan.io/address/0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072", e.explorerUrl())
+        e.act("gateFund"); assertEquals("I-1w", e.screenCode().first)
         tn.fundingRequest = null; tn.phase = "warmup"; tn.startup = org.gnosisvpn.stub.Tunnel.Startup(5, 19, "Connecting to Gnosis Chain")
         e.tick()
         assertEquals("I0", e.screenCode().first); assertEquals("Connecting to Gnosis Chain", e.syncStep())
@@ -212,6 +209,8 @@ class GnosisEngineTest {
         e.tick()
         assertEquals(Conn.CONNECTED, e.conn); assertEquals("S01", e.screenCode().first)
         assertEquals(500.0, e.left(), 0.1); assertEquals(350, e.ex(e.loc).ping); assertEquals(30, e.minsLeft())
+        assertEquals("30 min", e.timeLeft())
+        assertEquals("500 MB left · about 30 min", e.ongoingNote()!!.body)
         assertEquals("660 MB", e.chunkTxt())
         // the core buys the next chunk: "Renewed automatically"
         tn.session = tn.session!!.copy(bytesLeft = 1_100_000_000, bytesBought = 1_320_321_024)

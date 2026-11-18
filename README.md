@@ -61,7 +61,7 @@ screen is what the core reports, and what it does not report is not shown.
   `act(name, args)`; every change bumps `rev`, which recomposes the UI from the root (strong
   skipping is off for this reason, `app/build.gradle.kts`).
 - `ui/GnosisEngine.kt`: the engine the app runs, fed from `Tunnel` (`GnosisTunnel`):
-  - start-up: the funding gate (node address, what to send, faucet codes redeemed in the app),
+  - start-up: the funding gate (the funding site, and the node address as a QR code with a GnosisScan link),
     then the core's real warm-up stages as progress, or the failure page;
   - exits: the core's destinations with route health (path value against the core's own 0.9
     weak-route threshold, first relays), quick-check latency, slots and load;

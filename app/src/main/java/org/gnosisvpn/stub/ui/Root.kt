@@ -63,7 +63,7 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
         when {
             a == "ui:session" -> ui.dialog = "session"
             a == "ui:upload" -> ui.dialog = "upload"
-            a == "ui:redeem" -> ui.dialog = "redeem"
+            a == "ui:address" -> ui.dialog = "address"
             else -> eng.act(a, d)
         }
     }
@@ -92,7 +92,6 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
                     "settings" -> SettingsPage(eng, act, debug, extra)
                     "add" -> AddPage(eng, act)
                     "payout" -> PayOutPage(eng, act)
-                    "direct" -> DirectPage(eng, act)
                     "traffic" -> { LaunchedEffect(Unit) { viz.eps.clear(); viz.c = null; viz.dpk = 0.0; viz.upk = 0.0 }; TrafficPage(eng, act, viz, ui.vizMb) { ui.vizMb = !ui.vizMb } }
                     else -> Box(Modifier)
                 }

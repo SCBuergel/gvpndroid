@@ -1,8 +1,6 @@
 package org.gnosisvpn.stub.ui
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,7 +31,6 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -324,8 +321,8 @@ private fun SettingsUsage(eng: Engine, act: Act) {
     } }
     if (eng.balanceKnown && eng.balance <= eng.chunk) MsgCard(Msg(if (eng.balance < eng.chunk) Tone.BAD else Tone.WARN, "warning", if (eng.balance < eng.chunk) "Balance empty:" else "Balance running low:", if (eng.balance < eng.chunk) "no renewals left." else "1 renewal left."), act)
     ListGroup {
-        Li("Send funds directly", "Your address and what to send", "qr_code_2", { act.go("gateDirect") }) { Ms("chevron_right", tint = p.onV) }
-        Li("Open funding site", "Pay with crypto from a wallet", "account_balance_wallet", { act.go("funding") }, divider = true) { Ms("open_in_new", tint = p.onV) }
+        Li("Open funding site", "Pay with crypto from a wallet", "account_balance_wallet", { act.go("funding") }) { Ms("open_in_new", tint = p.onV) }
+        Li("Your VPN address", "QR code, copy, GnosisScan", "qr_code_2", { act.go("ui:address") }, divider = true) { Ms("chevron_right", tint = p.onV) }
     }
     if (eng.isOn() || eng.left() > 0) {
         SectionHead("This exit")
@@ -336,14 +333,10 @@ private fun SettingsUsage(eng: Engine, act: Act) {
 /* ---------- S18: add data ---------- */
 @Composable
 fun AddPage(eng: Engine, act: Act) {
-    Screen(top = { AppBar("Fund your VPN", { act.go("back") }) }, bottom = {
-        Btn(BK.FILLED, "Open funding site", { act.go("funding") }, size = BS.LG, trail = "open_in_new")
-        Btn(BK.OUTLINED, "Send funds directly", { act.go("gateDirect") }, size = BS.LG)
-    }) {
+    Screen(top = { AppBar("Fund your VPN", { act.go("back") }) }, bottom = { FundButtons(act, "funding") }) {
         val p = LocalPal.current
         Pad {
             PadCard { Text("Pay with crypto", style = T.tm, color = p.on); Text("Top up your balance with crypto you have left in a wallet. The funding site walks you through it.", style = T.bm, color = p.onV) }
-            PadCard { Text("Your VPN address", style = T.lbl, color = p.onV); Address(eng, act, share = true); Text("Paste it on the funding site.", style = T.bs, color = p.onV) }
             if (eng.pay != null) WaitMsg() else NoteText("Your balance updates by itself a few minutes after paying.")
         }
     }
@@ -381,42 +374,6 @@ fun PayOutPage(eng: Engine, act: Act) {
             }
             MsgCard(Msg(Tone.WARN, "shield", "Until you reconnect, your traffic will not be private.", ""), act)
             NoteText(rich("Android keeps Lockdown in its own VPN settings. Continue opens them: turn off **Block connections without VPN**, then come back. Once your payment arrives, we’ll ask you to turn it back on."))
-        }
-    }
-}
-
-/* ---------- I-1d: send funds directly ---------- */
-@Composable
-fun DirectPage(eng: Engine, act: Act) {
-    val p = LocalPal.current
-    val addr = eng.address()
-    val qr = remember(addr) { qrBitmap(addr) }
-    Screen(top = { AppBar("Send funds directly", { act.go("back") }) }) {
-        Pad {
-            Card { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp).size(200.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(10.dp)) {
-                    Image(qr, "QR code of your VPN address", Modifier.fillMaxSize(), filterQuality = androidx.compose.ui.graphics.FilterQuality.None)
-                }
-                Text("Your VPN address", style = T.lbl, color = p.onV)
-                Address(eng, act, share = true)
-            } }
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, p.outlineV, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Ms("info", size = 20.dp, tint = p.primaryT)
-                Text(rich("Send on **Gnosis Chain** only. Other networks won’t arrive."), style = T.bm, color = p.on)
-            }
-            SectionHead("What to send")
-            ListGroup {
-                eng.fundingNeeds().forEachIndexed { i, (tok, what, amt) ->
-                    Li(tok, what, divider = i > 0) {
-                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(amt, style = T.mono.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = p.on)
-                            when (eng.fundingOk(i)) { true -> Pill("Sufficient", PK.ON); false -> Pill("Needed"); null -> {} }
-                        }
-                    }
-                }
-            }
-            if (eng.pay != null) WaitMsg() else NoteText("Your balance updates by itself, usually within a few minutes of sending.")
-            Row { Btn(BK.TONAL, "Funding site", { act.go("funding") }, trail = "open_in_new") }
         }
     }
 }

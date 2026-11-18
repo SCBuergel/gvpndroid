@@ -66,16 +66,6 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         runCatching { GnosisProtocol.pricePerByte(File(dir, "gnosis.toml").readText()) }.getOrNull()
     }
 
-    override fun redeemCode(code: String, done: (ok: Boolean, message: String) -> Unit) {
-        Thread {
-            val r = if (!coreRunning) false to "Gnosis VPN is still starting. Try again in a moment."
-            else GnosisProtocol.fundingToolResult(GnosisNative.command(GnosisProtocol.fundingTool(code.trim())))
-            LogBuffer.log("gnosis: funding code -> ${r.second}")   // never the code itself
-            balanceDue = 0
-            main.post { done(r.first, r.second) }
-        }.start()
-    }
-
     override fun refreshExits() {
         if (coreRunning && phase == "running") Thread { GnosisNative.command(GnosisProtocol.PROBING_BOOST) }.start()
     }

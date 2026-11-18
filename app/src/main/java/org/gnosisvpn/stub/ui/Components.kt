@@ -77,7 +77,7 @@ fun icon(name: String, fill: Boolean = false): ImageVector = if (fill) when (nam
     "hourglass_top" -> Icons.Rounded.HourglassTop; "push_pin" -> Icons.Rounded.PushPin; "radar" -> Icons.Rounded.Radar
     "account_balance_wallet" -> Icons.Rounded.AccountBalanceWallet; "shield" -> Icons.Rounded.Shield; "block" -> Icons.Rounded.Block
     "error" -> Icons.Rounded.Error; "data_alert" -> Icons.Rounded.DataUsage; "vpn_key" -> Icons.Rounded.VpnKey
-    "upload" -> Icons.Rounded.Upload; "redeem" -> Icons.Rounded.Redeem; "schedule" -> Icons.Rounded.Schedule
+    "upload" -> Icons.Rounded.Upload; "schedule" -> Icons.Rounded.Schedule
     else -> icon(name, false)
 } else when (name) {
     "check_circle" -> Icons.Outlined.CheckCircle; "warning" -> Icons.Outlined.WarningAmber; "pause_circle" -> Icons.Outlined.PauseCircle
@@ -92,7 +92,7 @@ fun icon(name: String, fill: Boolean = false): ImageVector = if (fill) when (nam
     "arrow_back" -> Icons.AutoMirrored.Outlined.ArrowBack; "close" -> Icons.Outlined.Close; "search" -> Icons.Outlined.Search
     "open_in_new" -> Icons.AutoMirrored.Outlined.OpenInNew; "savings" -> Icons.Outlined.Savings; "content_copy" -> Icons.Outlined.ContentCopy
     "share" -> Icons.Outlined.Share; "shield" -> Icons.Outlined.Shield; "android" -> Icons.Outlined.Android; "touch_app" -> Icons.Outlined.TouchApp
-    "delete" -> Icons.Outlined.Delete; "schedule" -> Icons.Outlined.Schedule; "upload" -> Icons.Outlined.Upload; "redeem" -> Icons.Outlined.Redeem; "download" -> Icons.Outlined.Download
+    "delete" -> Icons.Outlined.Delete; "schedule" -> Icons.Outlined.Schedule; "upload" -> Icons.Outlined.Upload; "download" -> Icons.Outlined.Download
     "visibility_off" -> Icons.Outlined.VisibilityOff; "all_inclusive" -> Icons.Outlined.AllInclusive; "location_on" -> Icons.Outlined.LocationOn
     "monitoring" -> Icons.Outlined.Insights; "smart_toy" -> Icons.Outlined.SmartToy; "toggle_on" -> Icons.Outlined.ToggleOn
     "tune" -> Icons.Outlined.Tune; "qr_code_2" -> Icons.Outlined.QrCode2; "data_alert" -> Icons.Outlined.DataUsage; "error" -> Icons.Outlined.ErrorOutline

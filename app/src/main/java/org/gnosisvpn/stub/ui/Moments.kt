@@ -26,7 +26,8 @@ fun Engine.moment(): Msg? {
         Pause.BALANCE -> return Msg(Tone.BAD, "pause_circle", "Internet paused.",
             if (lockdown) "No data at ${e.city} and none in your balance. Paying needs the VPN and Lockdown off for a moment."
             else "No data at ${e.city} and none in your balance. Add data to continue.")
-        Pause.RENEWFAIL -> return Msg(Tone.BAD, "sync_problem", "Couldn’t renew.", "Trying again in {retry}. Traffic stays blocked meanwhile, so nothing leaks.")
+        Pause.RENEWFAIL -> return Msg(Tone.BAD, "sync_problem", "Couldn’t renew.",
+            (if (retryCountdown) "Trying again in {retry}." else "Gnosis VPN keeps trying.") + " Traffic stays blocked meanwhile, so nothing leaks.")
         null -> {}
     }
     if (conn == Conn.RECONNECTING) return if (lockdown)
@@ -69,11 +70,11 @@ fun Engine.simpleLine(m: Msg): Msg {
     var lead = m.lead; var text = m.text; var btns = m.btns
     fun first(t: String) = t.split(Regex("(?<=\\.)\\s"))[0]
     if (conn == Conn.PAUSED && lead != flash?.lead) {
-        text = when (pause) { Pause.NODATA -> "Your traffic stays private."; Pause.OFFLINE -> "The data left there is lost."; Pause.BALANCE -> "Your balance is empty."; Pause.RENEWFAIL -> "Next try in {retry}."; null -> text }
+        text = when (pause) { Pause.NODATA -> "Your traffic stays private."; Pause.OFFLINE -> "The data left there is lost."; Pause.BALANCE -> "Your balance is empty."; Pause.RENEWFAIL -> if (retryCountdown) "Next try in {retry}." else "Gnosis VPN keeps trying."; null -> text }
         btns = null
     } else if (conn == Conn.CONNECTED && left() <= LOW && !autoRenew && lead.contains("MB left")) { lead = "Data running low."; text = "About ${dur(minsLeft())} left." }
     else if (lead.startsWith("Better exit now")) { lead = "${exOrNull(better)?.city} is faster now."; text = "" }
-    else text = first(text)
+    else text = if (m.tone == Tone.INFO || m.tone == Tone.OK) "" else first(text)   // good news needs no second line
     return m.copy(lead = lead, text = text, btns = btns?.take(1))
 }
 
@@ -96,7 +97,6 @@ fun Engine.screenCode(): Pair<String, String> {
         "settings" -> return if (stab == "general") "S19n" to "Settings, General" else "S06n" to "Settings, Usage"
         "add" -> return "S18" to "Add data"
         "payout" -> return "S18a" to "Pay outside the VPN"
-        "direct" -> return "I-1d" to "Send funds directly"
         "traffic" -> return "—" to "Live traffic"
         "demo" -> return "—" to "Demo controls"
     }
@@ -134,7 +134,7 @@ fun Engine.ongoingNote(): Note? {
     return when (conn) {
         Conn.IDLE -> null
         Conn.CONNECTING -> Note("ongoing", "Connecting to ${e.city}", "Opening channels to relays…", listOf("Cancel" to "cancel"))
-        Conn.CONNECTED -> Note("ongoing", "Connected · ${e.city}", "${left().roundToInt()} MB left here · rotating relays", listOf("Disconnect" to "disconnect"))
+        Conn.CONNECTED -> Note("ongoing", "Connected · ${e.city}", if (left() > 0) "${mb(left())} left" + (timeLeft()?.let { " · about $it" } ?: "") else "Rotating relays", listOf("Disconnect" to "disconnect"))
         Conn.RECONNECTING -> Note("ongoing", "Reconnecting…", if (lockdown) "Lockdown on: internet blocked until the connection is back." else "Traffic isn’t protected until the connection is back.", listOf("Disconnect" to "disconnect"))
         Conn.PAUSED -> {
             val why = when (pause) { Pause.NODATA -> "No data left at ${e.city}."; Pause.OFFLINE -> "${e.city} went offline."; Pause.BALANCE -> "No data and none in your balance."; else -> "Couldn’t renew. Retrying soon." }

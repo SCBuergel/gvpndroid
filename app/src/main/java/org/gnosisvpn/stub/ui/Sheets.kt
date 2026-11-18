@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -21,11 +23,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -157,23 +155,12 @@ fun DialogHost(eng: Engine, act: Act, ui: UiState) {
             dismissButton = { TB("Cancel") { act.go("offCancel") } }, confirmButton = { TB("Turn off") { act.go("offDo") } })
         return
     }
+    if (ui.dialog == "address") { AddressSheet(eng, act) { ui.dialog = null }; return }
     when (ui.dialog) {
         "upload" -> AlertDialog(onDismissRequest = { ui.dialog = null }, containerColor = p.surfHi, icon = { DlgIcon("upload") },
             title = { Text("Upload logs to support?", style = T.hs, textAlign = TextAlign.Center, color = p.on) },
             text = { Text("Included: app and connection logs of the last 24 hours, the app version and your phone model. Not included: the sites you visit or your VPN address.", style = T.bm, color = p.onV) },
             dismissButton = { TB("Cancel") { ui.dialog = null } }, confirmButton = { TB("Upload") { ui.dialog = null; act.go("logsUpload") } })
-        "redeem" -> {
-            var code by remember { mutableStateOf("") }
-            AlertDialog(onDismissRequest = { ui.dialog = null }, containerColor = p.surfHi, icon = { DlgIcon("redeem") },
-                title = { Text("Redeem a funding code", style = T.hs, textAlign = TextAlign.Center, color = p.on) },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Gnosis VPN sends the code to the funding service, which funds your node directly.", style = T.bm, color = p.onV)
-                        OutlinedTextField(code, { code = it }, singleLine = true, label = { Text("Code") }, modifier = Modifier.fillMaxWidth().testTag("code-field"))
-                    }
-                },
-                dismissButton = { TB("Cancel") { ui.dialog = null } }, confirmButton = { TB("Redeem") { ui.dialog = null; act("redeem", mapOf("v" to code)) } })
-        }
         "session" -> AlertDialog(onDismissRequest = { ui.dialog = null }, containerColor = p.surfHi, icon = { DlgIcon("schedule") },
             title = { Text("Time remaining", style = T.hs, textAlign = TextAlign.Center, color = p.on) },
             text = {
@@ -183,13 +170,35 @@ fun DialogHost(eng: Engine, act: Act, ui: UiState) {
                         if (rows.isEmpty()) Text("Gnosis VPN reports the data left once the session is running.", style = T.bm, color = p.onV)
                         rows.forEachIndexed { i, (k, v) -> Dl(k, v, mono = true, divider = i < rows.size - 1) }
                     } else if (eng.isOn()) {
-                        Dl("Data at this rate", dur(eng.minsLeft()), mono = true)
+                        Dl("Data at this rate", eng.timeLeft() ?: "—", mono = true)
                         Dl("Session expiry", dur(max(0, ((10800 - eng.connSec) / 60).roundToInt())), mono = true, divider = false)
                         Text("Relay channels close after 3 h, because keeping them open costs data. Connecting again opens new ones.", style = T.bm, color = p.onV)
                     } else Text("Your session starts when you connect.", style = T.bm, color = p.onV)
                 }
             },
             confirmButton = { TB("OK") { ui.dialog = null } })
+    }
+}
+
+/** The VPN address to fund, as a QR code and text, with a link to it on the block explorer. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddressSheet(eng: Engine, act: Act, onClose: () -> Unit) {
+    val p = LocalPal.current
+    val addr = eng.address()
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = state, containerColor = p.surfLo, scrimColor = p.scrim, modifier = Modifier.testTag("address-sheet")) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 20.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Your VPN address", style = T.hs, color = p.on)
+            if (addr.isEmpty()) { Text("Gnosis VPN shows your address once your node has started.", style = T.bm, color = p.onV); return@Column }
+            val qr = remember(addr) { qrBitmap(addr) }
+            Box(Modifier.align(Alignment.CenterHorizontally).size(208.dp).clip(RoundedCornerShape(16.dp)).background(androidx.compose.ui.graphics.Color.White).padding(10.dp)) {
+                androidx.compose.foundation.Image(qr, "QR code of your VPN address", Modifier.fillMaxSize(), filterQuality = androidx.compose.ui.graphics.FilterQuality.None)
+            }
+            Address(eng, act, share = true)
+            Text(rich("On **Gnosis Chain** only. Funds sent on other networks don’t arrive."), style = T.bs, color = p.onV)
+            if (eng.explorerUrl().isNotEmpty()) Row { Btn(BK.TEXT, "View on GnosisScan", { act.go("explorer") }, trail = "open_in_new") }
+        }
     }
 }
 

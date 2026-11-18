@@ -11,8 +11,7 @@ import kotlin.math.roundToInt
 /**
  * The app's engine: every screen shows what the Gnosis VPN core reports through [Tunnel].
  *
- * - Start-up: the funding gate (run mode preparing_safe: the node's address, what to send, faucet
- *   codes), then "Discovering the network" with the core's real start-up steps, or the failure page.
+ * - Start-up: the funding gate (run mode preparing_safe: the funding site and the node's address), then "Discovering the network" with the core's real start-up steps, or the failure page.
  * - Exits: the core's destinations with their measured route (path value, first relays), latency,
  *   slots and load (route health and quick checks).
  * - The session: connect phases, connected, reconnecting and stalls, and the data bought for it in
@@ -27,6 +26,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override val simulatesSystem = false
     override val autoRenewFixed = true
     override val canUploadLogs = false
+    override val retryCountdown = false
 
     private var fundAddress: String? = null
     private var need: String? = null
@@ -207,7 +207,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                     val prev = lastBought
                     if (prev != null && bought > prev && conn == Conn.CONNECTED) {
                         allocN++; allocAt[loc] = t
-                        setFlash(Tone.OK, "Renewed automatically.", "${mb((bought - prev) / 1e6)} set aside at ${e.city}. Tip: switching exits now and then makes your traffic harder to link.")
+                        setFlash(Tone.OK, "Renewed automatically.", "${mb((bought - prev) / 1e6)} more at ${e.city}.")
                         fire("u2:$allocN", Note("u2", "Renewing automatically", "${mb((bought - prev) / 1e6)} set aside at ${e.city}. Shown in the app only.", silent = true))
                     }
                     lastBought = bought
@@ -239,7 +239,6 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                     lost = left()
                     fire("off:${t.toInt()}", Note("off", "Internet paused", "${e.city} went offline. Traffic stays blocked until you pick another exit.", listOf("Connect to best available" to "bestAvail", "Close" to "nclose"), proposed = true))
                 }
-                if (newPause == Pause.RENEWFAIL && pause != Pause.RENEWFAIL) retryAt = t + 30
                 conn = newConn; pause = newPause
                 // the internet pauses soon: little data left and nothing to renew with
                 val a = left()
@@ -292,6 +291,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     }
 
     override fun minsLeft(v: Double): Int = session?.emptyInSec?.let { max(1, (it / 60).toInt()) } ?: super.minsLeft(v)
+    /** From the core's estimate only (the data left over the current rate); idle traffic has none. */
+    override fun timeLeft(): String? = session?.emptyInSec?.let { sec -> if (sec >= 86_400) "over a day" else dur(max(1, (sec / 60).toInt())) }
 
     /* ---- actions ---- */
     override fun runCheck() { nextCheck = Double.MAX_VALUE }
@@ -323,8 +324,6 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             "renew" -> { sheet = null; if (conn == Conn.PAUSED || conn == Conn.IDLE) doConnect(loc) else emit(); return }   // retry: the core renews by itself
             "arOnGo", "arOffGo" -> { arIntro = true; super.act("sheetGo", d); save(); return }
             "funding", "gateFund" -> { hooks.openUrl(fundUrl()); if (gate) pay = t; emit(); return }
-            "gateDirect" -> { go("direct"); emit(); return }
-            "redeem" -> { redeem(d["v"] ?: ""); return }
             "failRetry", "restart" -> { fail = null; syncT = 0.0; hooks.restartBackend(); emit(); return }
             "pick" -> { tunnel().refreshExits(); super.act(a, d); return }
         }
@@ -332,13 +331,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         save()
     }
 
-    private fun redeem(code: String) {
-        if (code.isBlank()) { toast("Enter your code first."); return }
-        tunnel().redeemCode(code) { ok, msg -> if (ok) pay = t; toast(msg); emit() }
-    }
-
     override fun address(): String = fundAddress ?: wallet?.address ?: ""
     override fun fundUrl(): String = FAUCET_URL
+    override fun explorerUrl(): String = address().takeIf { ADDRESS.matches(it) }?.let { "$EXPLORER_URL$it" } ?: ""
 
     override fun fundingNeeds(): List<Triple<String, String, String>> {
         val w = wallet
@@ -390,5 +385,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
 
         /** The Gnosis VPN funding site (faucet codes). */
         const val FAUCET_URL = "https://faucet.vpn.gnosis.eth.limo/"
+        /** Addresses on Gnosis Chain's block explorer. */
+        const val EXPLORER_URL = "https://gnosisscan.io/address/"
+        private val ADDRESS = Regex("0x[0-9a-fA-F]{40}")
     }
 }

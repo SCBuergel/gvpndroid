@@ -165,6 +165,8 @@ open class Engine {
     fun chunkTxt() = mb(chunk)
     /** Renewing is the backend's job (the Gnosis core buys the next chunk by itself): no Auto-renew switch. */
     open val autoRenewFixed = false
+    /** A failed renewal is retried on a schedule the engine knows (a countdown is shown); false = the backend retries by itself. */
+    open val retryCountdown = true
     /** Log upload to support exists. */
     open val canUploadLogs = true
     /** How far the connect is, 0..1, when the backend reports it; null = time-based. */
@@ -204,6 +206,8 @@ open class Engine {
     fun usable(e: Exit) = !e.full && !e.offline
     fun left(id: String = loc): Double = alloc[id] ?: 0.0
     open fun minsLeft(v: Double = left()): Int = max(1, (v / RATE / 60).roundToInt())
+    /** How long the data left here lasts at the current rate, as shown ("1 h 20 min"); null = unknown. */
+    open fun timeLeft(): String? = dur(minsLeft())
     fun isOn() = conn == Conn.CONNECTED || conn == Conn.RECONNECTING
     fun heldLeft(id: String): Double { val at = allocAt[id] ?: (t - 600); return max(0.0, HOLD_S - (t - at)) }
     fun warmNow() = warm && t < warmEnd
@@ -531,13 +535,13 @@ open class Engine {
             "funding" -> { hooks.openUrl(fundUrl()); if (pay == null) pay = t + 120 }
             "copy" -> { copiedAt = now(); hooks.copy("VPN address", address()); toast("Address copied") }
             "share" -> hooks.share(address())
+            "explorer" -> explorerUrl().takeIf { it.isNotEmpty() }?.let { hooks.openUrl(it) }
             "lockOn" -> openSysVpn("lockOn")
             "ldNot" -> ldOffPay = false
             "tab" -> stab = v
             "tog" -> { toggle(d["k"] ?: ""); if (d["k"] == "autoRenew" && autoRenew) offered = true }
             "sheetNo" -> { if (sheet?.check == true) arDecl = allocN; sheet = null }
             "gateFund" -> { hooks.openUrl(fundUrl()); if (pay == null) pay = t + 120 }
-            "gateDirect" -> { go("direct"); if (pay == null) pay = t + 120 }
             "gateRestart" -> { balance = 0.0; added = 0.0; pay = null; home(); sheet = null; flash = null; fq.clear(); conn = Conn.IDLE; syncT = null; gate = true; fail = null }
             "togHide" -> popover = !popover
             "togAR" -> { autoRenew = !autoRenew; if (autoRenew) offered = true }
@@ -591,6 +595,8 @@ open class Engine {
     open fun onCancel() {}
     open fun onTurnOff() {}
     open fun address(): String = ""
+    /** The VPN address on a block explorer; "" = none. */
+    open fun explorerUrl(): String = ""
     /* Extension points for a real backend (defaults: the prototype's simulation). */
     open fun syncLen(): Double = SYNC_LEN
     /** Progress of "Discovering the network", 0..1. */
@@ -602,7 +608,7 @@ open class Engine {
     /** The short id after the country name. */
     open fun exitTag(e: Exit): String = xid(e.id)
     open fun serverLoad(e: Exit): Int? = null
-    /** What to send on "Send funds directly": token, what it pays for, amount. */
+    /** What the node needs: token, what it pays for, amount. */
     open fun fundingNeeds(): List<Triple<String, String, String>> = emptyList()
     open fun fundUrl(): String = ""
 

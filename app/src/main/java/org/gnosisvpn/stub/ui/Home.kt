@@ -68,17 +68,26 @@ fun Screen(bg: Color = LocalPal.current.bg, top: @Composable ColumnScope.() -> U
 @Composable
 fun GateScreen(eng: Engine, act: Act, debug: Boolean) {
     val p = LocalPal.current
-    Screen(bottom = {
-        Btn(BK.FILLED, "Open funding site", { act.go("gateFund") }, size = BS.LG, trail = "open_in_new")
-        Btn(BK.OUTLINED, "Send funds directly", { act.go("gateDirect") }, size = BS.LG)
-        Btn(BK.TEXT, "I have a funding code", { act.go("ui:redeem") }, modifier = Modifier.align(Alignment.CenterHorizontally), icon = "redeem")
-    }) {
+    Screen(bottom = { FundButtons(act, "gateFund") }) {
         Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Logo(); Spacer(Modifier.height(4.dp))
             Text("Fund your VPN", style = T.hl, color = p.on, textAlign = TextAlign.Center)
             Text("Your funds pay the independent nodes that carry your traffic. Once they arrive, we find your best route.", style = T.lead, color = p.onV, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 320.dp))
             GVis(Modifier.widthIn(max = 280.dp))
             if (eng.pay != null) WaitMsg()
+        }
+    }
+}
+
+/** The funding site, and next to it the VPN address (QR code, text, GnosisScan) in a sheet. */
+@Composable
+fun FundButtons(act: Act, fund: String) {
+    val p = LocalPal.current
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Btn(BK.FILLED, "Open funding site", { act.go(fund) }, Modifier.weight(1f), size = BS.LG, trail = "open_in_new")
+        Tip("Your VPN address") {
+            Box(Modifier.size(56.dp).clip(CircleShape).background(p.sc).clickable { act.go("ui:address") }.semantics { contentDescription = "Your VPN address" }.testTag("address"),
+                contentAlignment = Alignment.Center) { Ms("qr_code_2", size = 26.dp, tint = p.onSc) }
         }
     }
 }
@@ -221,11 +230,12 @@ fun HomeScreen(eng: Engine, act: Act, moreMsgs: Boolean, toggleMore: () -> Unit)
                             Text(x.country, fontFamily = Inter, fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.8).sp, color = p.on, modifier = Modifier.padding(top = 6.dp), textAlign = TextAlign.Center)
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (c == Conn.CONNECTED && eng.metered && a > 0) DataLeft(eng, act)
+                    else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Bars(e, eng, chk)
                         if (chk) Text("Checking…", style = T.bm, color = p.onV) else QLine(e, eng)
                     }
-                    Box(Modifier.heightIn(min = 24.dp)) { label() }
+                    if (eng.mode != "auto" || c == Conn.PAUSED) Box(Modifier.heightIn(min = 24.dp)) { label() }
                 }
             } else {
                 DetailCard(eng, act, label, chk)
@@ -234,7 +244,7 @@ fun HomeScreen(eng: Engine, act: Act, moreMsgs: Boolean, toggleMore: () -> Unit)
             Column(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (c == Conn.CONNECTING) ConnectingSlot(eng)
                 else {
-                    val all = eng.moments(); val lim = if (moreMsgs) 9 else if (eng.ldOffPay) 1 else 2
+                    val all = eng.moments(); val lim = if (moreMsgs) 9 else if (eng.ldOffPay || simple) 1 else 2
                     val live: (String) -> String = { it.replace("{retry}", eng.retryText()) }
                     all.take(lim).map { if (simple) eng.simpleLine(it) else it }.forEach { MsgCard(it, act, live) }
                     if (all.size > lim) Row(
@@ -338,11 +348,14 @@ private fun DetailCard(eng: Engine, act: Act, label: @Composable () -> Unit, chk
                     Kv(if (c == Conn.CONNECTED) "Connected for" else "Route", if (c == Conn.CONNECTED) dur((eng.connSec / 60).toInt()) else "1 hop", mono = c == Conn.CONNECTED)
                 } else if (c == Conn.PAUSED) when (pz) {
                     Pause.OFFLINE -> { Kv("Exit", "Offline", p.err); Kv("Data lost", "${eng.lost.roundToInt()} MB", mono = true) }
-                    Pause.RENEWFAIL -> { Kv("Renewal", "Failed", p.err); Kv("Next try in", eng.retryText(), mono = true) }
+                    Pause.RENEWFAIL -> { Kv("Renewal", "Failed", p.err); if (eng.retryCountdown) Kv("Next try in", eng.retryText(), mono = true) else Kv("Retrying", "Automatically") }
                     else -> { Kv("This session", "${a.roundToInt()} MB", p.err, mono = true); if (pz == Pause.BALANCE) Kv("Balance", eng.balanceText(), p.err, true) else Kv("Traffic", "Blocked", p.err) }
                 } else {
                     Kv("Ping", if (c == Conn.RECONNECTING || e.ping <= 0) "—" else "${e.ping.grouped()} ms", if (c == Conn.RECONNECTING) p.onV else if (e.ping < 500) p.okT else if (e.ping < 900) p.warn else p.err, true)
-                    if (a > 0 || c == Conn.CONNECTED) Kv("This session", "${a.roundToInt()} MB", if (a <= LOW) p.warn else Color.Unspecified, true)
+                    if (a > 0 || c == Conn.CONNECTED) {
+                        Kv("Data left", mb(a), if (a <= LOW) p.warn else Color.Unspecified, true)
+                        if (c == Conn.CONNECTED) Kv("Lasts", eng.timeLeft() ?: "—", mono = true)
+                    }
                     else if (c == Conn.IDLE) Kv("Sets aside", if (eng.free) "${eng.chunkTxt()} free" else "${eng.chunkTxt()}", mono = true)
                 }
                 if (canDet) Ms(if (eng.details) "expand_less" else "expand_more", tint = p.onV)
@@ -381,6 +394,29 @@ private fun DetailsCard(eng: Engine, act: Act) {
     }
 }
 
+/** The main screen while connected: the data left at this exit, how long it lasts, a meter. Tap: the session's numbers. */
+@Composable
+private fun DataLeft(eng: Engine, act: Act) {
+    val p = LocalPal.current
+    val a = eng.left(); val tl = eng.timeLeft()
+    val low = a <= LOW
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).clickable { act.go("ui:session") }
+            .semantics { contentDescription = "${mb(a)} left at this exit" + (tl?.let { ", lasts about $it" } ?: "") + ". Session details" }
+            .padding(horizontal = 12.dp, vertical = 6.dp).testTag("data-left"),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(buildAnnotatedStringOf(mb(a) + " left", tl?.let { " · about $it" }), style = T.tm.copy(fontSize = 17.sp), color = if (low) p.warn else p.on, textAlign = TextAlign.Center)
+        Lin((a / eng.chunk).toFloat().coerceIn(0f, 1f), Modifier.width(200.dp), if (low) p.warn else p.sync, 6.dp)
+        if (eng.autoRenewFixed && !eng.short()) Text("Renews from your balance", style = T.bs, color = p.onV)
+    }
+}
+
+private fun buildAnnotatedStringOf(main: String, rest: String?) = androidx.compose.ui.text.buildAnnotatedString {
+    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold)); append(main); pop()
+    if (rest != null) { pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Normal)); append(rest); pop() }
+}
+
 /** Data left at this exit: meter and time remaining (usageHTML). */
 @Composable
 fun Usage(eng: Engine, cap: String, act: Act) {
@@ -389,10 +425,10 @@ fun Usage(eng: Engine, cap: String, act: Act) {
     Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
             Text(cap, style = T.lbl, color = p.onV)
-            Text("${a.roundToInt()} MB", style = T.mono.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = p.on)
+            Text(mb(a), style = T.mono.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = p.on)
         }
         Lin((a / eng.chunk).toFloat(), color = if (a <= LOW) p.warn else p.sync, h = 8.dp)
-        val tl = if (a > 0) "Time remaining " + dur(if (eng.isOn() && eng.sessionRows() == null) minOf(eng.minsLeft(), maxOf(0, ((10800 - eng.connSec) / 60).roundToInt())) else eng.minsLeft()) else "—"
+        val tl = if (a > 0) "Time remaining " + (if (eng.isOn() && eng.sessionRows() == null) dur(minOf(eng.minsLeft(), maxOf(0, ((10800 - eng.connSec) / 60).roundToInt()))) else eng.timeLeft() ?: "—") else "—"
         Row(
             Modifier.height(32.dp).clip(RoundedCornerShape(8.dp)).clickable { act.go("ui:session") }.padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),

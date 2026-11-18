@@ -96,9 +96,6 @@ interface Tunnel {
     /** The backend's wallet, refreshed in the background; null while unknown. */
     val wallet: Wallet? get() = null
 
-    /** Redeems a funding code (faucet); [done] gets a readable result on the main thread. */
-    fun redeemCode(code: String, done: (ok: Boolean, message: String) -> Unit) { done(false, "Not supported") }
-
     /** Asks the backend to measure the exits again soon (the user looks at the list). */
     fun refreshExits() {}
 
