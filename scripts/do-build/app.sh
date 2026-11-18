@@ -87,8 +87,9 @@ ssh_ "cd /root/src && nohup bash -c 'ANDROID_HOME=/opt/sdk GVPNDROID_SECRETS=/ro
 # Bounded: stop before the deadline deletes the droplet, or when it stops answering.
 limit=$(( t0 + DEADLINE_S - 300 )); fails=0
 while :; do
-    if r=$(ssh_ 'grep -c "^JOB-EXIT" /root/build.log' 2>/dev/null); then
-        fails=0; [ "${r:-0}" -gt 0 ] && break
+    # ssh exits 255 only when the connection fails; the remote command always prints 1 or 0.
+    if r=$(ssh_ 'if grep -q "^JOB-EXIT" /root/build.log 2>/dev/null; then echo 1; else echo 0; fi' 2>/dev/null); then
+        fails=0; [ "$r" = 1 ] && break
     else
         fails=$((fails + 1)); [ "$fails" -ge 8 ] && { echo "droplet stopped answering (8 ssh failures in a row)" >&2; exit 1; }
     fi

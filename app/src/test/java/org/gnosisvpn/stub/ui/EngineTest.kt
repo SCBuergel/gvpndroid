@@ -276,12 +276,28 @@ class GnosisEngineTest {
         e.tick(); assertEquals(Pause.RENEWFAIL, e.pause)
         tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick()
         assertEquals("still a payment problem, not a plain reconnect", Conn.PAUSED, e.conn); assertEquals(Pause.RENEWFAIL, e.pause)
-        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, payment = T.Payment.PENDING); e.tick()
-        assertEquals(Conn.PAUSED, e.conn)
         assertEquals("Couldn’t pay for data; your balance may be too low. Traffic stays blocked.", e.ongoingNote()!!.body)
+        // back on the exit's free allowance: traffic flows, so the app says connected
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, payment = T.Payment.PENDING); e.tick()
+        assertEquals(Conn.CONNECTED, e.conn)
+        // the exit holds traffic again while the failure is recent: paused, without a new FAILED report
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, stalled = true, awaitingPayment = true, payment = T.Payment.PENDING); e.tick()
+        assertEquals(Conn.PAUSED, e.conn); assertEquals(Pause.RENEWFAIL, e.pause)
         // a payment goes through: connected again
         tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 600_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED); e.tick()
         assertEquals(Conn.CONNECTED, e.conn); assertNull(e.pause)
+    }
+
+    @Test fun failedRenewalWithDataLeftStaysConnected() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 300_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED); e.tick()
+        assertEquals(Conn.CONNECTED, e.conn)
+        tn.session = tn.session!!.copy(payment = T.Payment.FAILED); e.tick()
+        assertEquals("data still flows: not paused", Conn.CONNECTED, e.conn); assertNull(e.pause)
+        val m = e.moments().first()
+        assertEquals("Couldn’t buy more data yet.", m.lead)
+        assertTrue(e.ongoingNote()!!.title.startsWith("Connected"))
     }
 
     @Test fun startupShowsTheCoresIssueInsteadOfTheStep() {

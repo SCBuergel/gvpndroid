@@ -228,7 +228,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                 val payFailing = payFailAt?.let { t - it < PAY_FAIL_HOLD_S } == true
                 val newConn = when {
                     s.reconnecting && !reachable -> Conn.PAUSED
-                    payFailing -> Conn.PAUSED
+                    // Paused only while the exit actually holds traffic (or the core reconnects after
+                    // ending the hold); with data still flowing it stays connected, with a flash.
+                    payFailing && (s.awaitingPayment || s.reconnecting) -> Conn.PAUSED
                     s.reconnecting -> Conn.RECONNECTING
                     s.step != null && s.step < s.steps - 1 && !s.stalled && tn.state != Tunnel.State.CONNECTED -> Conn.CONNECTING
                     s.awaitingPayment && (wallet?.trafficLevel == Tunnel.Level.EMPTY) -> Conn.PAUSED
@@ -259,7 +261,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                 if (conn == Conn.CONNECTED && a in 0.01..(chunk * 0.04) && wallet?.trafficLevel == Tunnel.Level.EMPTY)
                     fire("u6:$allocN", Note("u6", "Internet pauses soon", "About ${a.roundToInt()} MB of data left at ${e.city}.", listOf("Add data" to "addData", "Close" to "nclose")))
                 val payFail = s.payment == Tunnel.Payment.FAILED
-                if (payFail && !lastPayFail && conn == Conn.CONNECTED) setFlash(Tone.WARN, "Couldn’t buy more data yet.", "Gnosis VPN keeps trying.")
+                if (payFail && !lastPayFail && conn == Conn.CONNECTED) setFlash(Tone.WARN, "Couldn’t buy more data yet.", "Your VPN balance may be too low. Gnosis VPN keeps trying.")
                 lastPayFail = payFail
             }
         }
