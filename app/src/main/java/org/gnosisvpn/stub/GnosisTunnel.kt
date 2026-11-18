@@ -52,6 +52,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     override val locations: List<Tunnel.Location> get() = destinations.map { it.toLocation() }
 
+    override val phase: String? get() = status?.let { GnosisProtocol.runMode(it) }
+
     override val selectedLocation: Tunnel.Location?
         get() {
             val wanted = runCatching { loadProps().getProperty("destination") }.getOrNull() ?: return null

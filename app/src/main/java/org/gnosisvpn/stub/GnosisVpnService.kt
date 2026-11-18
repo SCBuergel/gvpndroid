@@ -63,6 +63,9 @@ class GnosisVpnService : VpnService() {
         private const val DEFAULT_DNS = "9.9.9.9"
         @Volatile private var running = CompletableFuture<GnosisVpnService>()
 
+        /** The running instance, if any (no start). */
+        fun current(): GnosisVpnService? = running.getNow(null)
+
         /** Starts the service if needed and returns the running instance. */
         fun obtain(context: Context): GnosisVpnService {
             context.startService(Intent(context, GnosisVpnService::class.java))

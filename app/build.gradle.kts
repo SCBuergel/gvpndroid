@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -33,6 +34,8 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
+    buildFeatures { compose = true }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -40,6 +43,12 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+composeCompiler {
+    // The UI reads the engine's plain fields and recomposes from the root on every engine change
+    // (Engine.rev). Strong skipping would skip children whose engine parameter is the same instance.
+    featureFlags = setOf(org.jetbrains.kotlin.compose.compiler.gradle.ComposeFeatureFlag.StrongSkipping.disabled())
 }
 
 dependencies {
@@ -51,6 +60,16 @@ dependencies {
     implementation("androidx.core:core:1.13.1")
     // Must equal the rustls-platform-verifier-android version in the Rust core's Cargo.lock.
     implementation("org.rustls:rustls-platform-verifier:0.2.0")
+
+    // The UI: Jetpack Compose with Material 3.
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.activity:activity-compose:1.9.3")
+    // The "Discovering the network" animation (the demo's Lottie file).
+    implementation("com.airbnb.android:lottie-compose:6.6.2")
 
     testImplementation("junit:junit:4.13.2")
     // Real org.json for unit tests (android.jar's is a stub that returns defaults).

@@ -11,17 +11,43 @@
         android:name=".App"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@android:style/Theme.Material.Light.DarkActionBar">
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.UiActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Gnosis"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- The stub's original screen: backends, node identity, raw logs (Settings → Developer screen). -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:label="Developer screen"
+            android:launchMode="singleTop" />
+
+        <receiver
+            android:name=".ui.NotificationActionReceiver"
+            android:exported="false" />
+        <service
+            android:name=".ui.GnosisTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_vpn_key"
+            android:label="Gnosis VPN"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
 
         <service
             android:name=".TunnelService"

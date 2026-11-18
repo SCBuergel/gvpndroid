@@ -1,6 +1,8 @@
 package org.gnosisvpn.stub
 
 import android.app.Application
+import org.gnosisvpn.stub.ui.ongoingNote
+import org.gnosisvpn.stub.ui.screenCode
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.app.NotificationChannel
@@ -18,9 +20,52 @@ class App : Application() {
     var usesGnosis = false
         private set
 
+    /**
+     * The new UI's state machine: the demo engine (the prototype's simulation) or the Gnosis engine
+     * (the real core through [tunnel]). Chosen in Demo controls → Backend; the default is Gnosis
+     * when this install has the Gnosis backend set up (Developer screen), else the demo.
+     */
+    private val engineState = androidx.compose.runtime.mutableStateOf<org.gnosisvpn.stub.ui.Engine?>(null)
+    val engine: org.gnosisvpn.stub.ui.Engine get() = engineState.value ?: makeEngine(engineKind()).also { engineState.value = it }
+    fun engineKind(): String = getSharedPreferences("ui", MODE_PRIVATE).getString("engine", null) ?: if (usesGnosis) "gnosis" else "demo"
+    /** Switches engines; false if the Gnosis backend is not set up. */
+    fun useEngine(kind: String): Boolean {
+        if (kind == "gnosis" && !usesGnosis) return false
+        getSharedPreferences("ui", MODE_PRIVATE).edit().putString("engine", kind).apply()
+        engineState.value?.let { it.stop(); org.gnosisvpn.stub.ui.Notifier.ongoing(this, null) }
+        engineState.value = makeEngine(kind)
+        return true
+    }
+    private fun makeEngine(kind: String): org.gnosisvpn.stub.ui.Engine {
+        val e = if (kind == "gnosis" && usesGnosis) org.gnosisvpn.stub.ui.GnosisEngine { tunnel } else org.gnosisvpn.stub.ui.Engine()
+        return e.also { e ->
+            e.hooks = org.gnosisvpn.stub.ui.AppHooks(this)
+            var lastConn: org.gnosisvpn.stub.ui.Conn? = null
+            var lastCode = ""
+            e.onChange = {
+                org.gnosisvpn.stub.ui.Notifier.ruleNotes = ui.rules
+                if (e.simulatesSystem) org.gnosisvpn.stub.ui.Notifier.ongoing(this, e.ongoingNote())
+                if (e.conn != lastConn) { lastConn = e.conn; org.gnosisvpn.stub.ui.GnosisTileService.update(this) }
+                val code = e.screenCode().first
+                if (code != lastCode) { lastCode = code; android.util.Log.i("GnosisUi", "screen $code ${e.screenCode().second}") }
+            }
+            e.start()
+        }
+    }
+    val ui: org.gnosisvpn.stub.ui.UiState by lazy {
+        val prefs = getSharedPreferences("ui", MODE_PRIVATE)
+        org.gnosisvpn.stub.ui.UiState(prefs.getString("mode", "system") ?: "system") { prefs.edit().putString("mode", it).apply() }
+    }
+    /** The visible UI activity, for hooks that need one (file picker, share sheet). */
+    var activity: org.gnosisvpn.stub.ui.UiActivity? = null
+
+    /** Lockdown (Always-on + Block connections without VPN) as Android reports it to the running VpnService; null if unknown. */
+    fun readLockdown(): Boolean? = if (android.os.Build.VERSION.SDK_INT >= 29) GnosisVpnService.current()?.isLockdownEnabled else null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
+        org.gnosisvpn.stub.ui.Notifier.channels(this)
         installCrashRecorder()
         store = ConfigStore(this)
         selectBackend()

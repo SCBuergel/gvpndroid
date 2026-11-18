@@ -46,6 +46,9 @@ interface Tunnel {
     /** Set while the backend waits for funds before it can connect. */
     val fundingRequest: FundingRequest? get() = null
 
+    /** The backend's start-up phase ("warmup", "preparing_safe", "deploying_safe", "running"), if it has one. */
+    val phase: String? get() = null
+
     /** How much the backend logs. */
     fun setLogLevel(level: LogLevel) {}
 
