@@ -74,7 +74,7 @@ fun Engine.simpleLine(m: Msg): Msg {
         btns = null
     } else if (conn == Conn.CONNECTED && left() <= LOW && !autoRenew && lead.contains("MB left")) { lead = "Data running low."; text = "About ${dur(minsLeft())} left." }
     else if (lead.startsWith("Better exit now")) { lead = "${exOrNull(better)?.city} is faster now."; text = "" }
-    else text = if (m.tone == Tone.INFO || m.tone == Tone.OK) "" else first(text)   // good news needs no second line
+    else text = if (m.tone == Tone.OK && !lead.startsWith("Lockdown")) "" else first(text)   // good news needs no second line; Lockdown's always says what it means
     return m.copy(lead = lead, text = text, btns = btns?.take(1))
 }
 
@@ -134,7 +134,7 @@ fun Engine.ongoingNote(): Note? {
     return when (conn) {
         Conn.IDLE -> null
         Conn.CONNECTING -> Note("ongoing", "Connecting to ${e.city}", "Opening channels to relays…", listOf("Cancel" to "cancel"))
-        Conn.CONNECTED -> Note("ongoing", "Connected · ${e.city}", if (left() > 0) "${mb(left())} left" + (timeLeft()?.let { " · about $it" } ?: "") else "Rotating relays", listOf("Disconnect" to "disconnect"))
+        Conn.CONNECTED -> Note("ongoing", "Connected · ${e.city}", if (left() > 0) "${mb(left())} left" + (timeLeft()?.let { " · $it" } ?: "") else "Rotating relays", listOf("Disconnect" to "disconnect"))
         Conn.RECONNECTING -> Note("ongoing", "Reconnecting…", if (lockdown) "Lockdown on: internet blocked until the connection is back." else "Traffic isn’t protected until the connection is back.", listOf("Disconnect" to "disconnect"))
         Conn.PAUSED -> {
             val why = when (pause) { Pause.NODATA -> "No data left at ${e.city}."; Pause.OFFLINE -> "${e.city} went offline."; Pause.BALANCE -> "No data and none in your balance."; else -> "Couldn’t renew. Retrying soon." }

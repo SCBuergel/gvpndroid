@@ -1,5 +1,6 @@
 package org.gnosisvpn.stub.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,6 +29,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -145,7 +148,7 @@ private fun Leave(eng: Engine, toId: String) {
 @Composable
 fun DialogHost(eng: Engine, act: Act, ui: UiState) {
     val p = LocalPal.current
-    @Composable fun DlgIcon(name: String, tint: androidx.compose.ui.graphics.Color = p.scIc) = Ms(name, size = 26.dp, tint = tint)
+    @Composable fun DlgIcon(name: String, tint: Color = p.scIc) = Ms(name, size = 26.dp, tint = tint)
     @Composable fun TB(l: String, f: () -> Unit) = TextButton(f) { Text(l, fontFamily = Inter, fontWeight = FontWeight.SemiBold, color = p.primaryT) }
     if (eng.offConfirm) {
         AlertDialog(onDismissRequest = { act.go("offCancel") }, containerColor = p.surfHi,
@@ -192,10 +195,11 @@ private fun AddressSheet(eng: Engine, act: Act, onClose: () -> Unit) {
             Text("Your VPN address", style = T.hs, color = p.on)
             if (addr.isEmpty()) { Text("Gnosis VPN shows your address once your node has started.", style = T.bm, color = p.onV); return@Column }
             val qr = remember(addr) { qrBitmap(addr) }
-            Box(Modifier.align(Alignment.CenterHorizontally).size(208.dp).clip(RoundedCornerShape(16.dp)).background(androidx.compose.ui.graphics.Color.White).padding(10.dp)) {
-                androidx.compose.foundation.Image(qr, "QR code of your VPN address", Modifier.fillMaxSize(), filterQuality = androidx.compose.ui.graphics.FilterQuality.None)
+            Box(Modifier.align(Alignment.CenterHorizontally).size(208.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(10.dp)) {
+                Image(qr, "QR code of your VPN address", Modifier.fillMaxSize(), filterQuality = FilterQuality.None)
             }
             Address(eng, act, share = true)
+            eng.fundingAmounts()?.let { Text(rich("Send at least **$it**."), style = T.bm, color = p.on) }
             Text(rich("On **Gnosis Chain** only. Funds sent on other networks don’t arrive."), style = T.bs, color = p.onV)
             if (eng.explorerUrl().isNotEmpty()) Row { Btn(BK.TEXT, "View on GnosisScan", { act.go("explorer") }, trail = "open_in_new") }
         }

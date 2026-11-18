@@ -40,7 +40,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -402,19 +405,19 @@ private fun DataLeft(eng: Engine, act: Act) {
     val low = a <= LOW
     Column(
         Modifier.clip(RoundedCornerShape(12.dp)).clickable { act.go("ui:session") }
-            .semantics { contentDescription = "${mb(a)} left at this exit" + (tl?.let { ", lasts about $it" } ?: "") + ". Session details" }
+            .semantics { contentDescription = "${mb(a)} left at this exit" + (tl?.let { ", lasts $it" } ?: "") + ". Session details" }
             .padding(horizontal = 12.dp, vertical = 6.dp).testTag("data-left"),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(buildAnnotatedStringOf(mb(a) + " left", tl?.let { " · about $it" }), style = T.tm.copy(fontSize = 17.sp), color = if (low) p.warn else p.on, textAlign = TextAlign.Center)
+        Text(leftText(mb(a) + " left", tl?.let { " · $it" }), style = T.tm.copy(fontSize = 17.sp), color = if (low) p.warn else p.on, textAlign = TextAlign.Center)
         Lin((a / eng.chunk).toFloat().coerceIn(0f, 1f), Modifier.width(200.dp), if (low) p.warn else p.sync, 6.dp)
         if (eng.autoRenewFixed && !eng.short()) Text("Renews from your balance", style = T.bs, color = p.onV)
     }
 }
 
-private fun buildAnnotatedStringOf(main: String, rest: String?) = androidx.compose.ui.text.buildAnnotatedString {
-    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold)); append(main); pop()
-    if (rest != null) { pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Normal)); append(rest); pop() }
+private fun leftText(main: String, rest: String?) = buildAnnotatedString {
+    withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(main) }
+    if (rest != null) withStyle(SpanStyle(fontWeight = FontWeight.Normal)) { append(rest) }
 }
 
 /** Data left at this exit: meter and time remaining (usageHTML). */

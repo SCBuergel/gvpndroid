@@ -179,8 +179,9 @@ open class Engine {
     fun short() = balanceKnown && balance < chunk
     /** The balance as shown (data, or tokens while the data estimate is unknown). */
     open fun balanceText(): String = mb(balance)
-    /** Funding row [i] of fundingNeeds() is covered (true), missing (false) or unknown (null). */
-    open fun fundingOk(i: Int): Boolean? = balance >= chunk
+    /** What to send to the VPN address, from fundingNeeds() ("225.35 wxHOPR and 0.005 xDAI"); null = nothing known. */
+    fun fundingAmounts(): String? =
+        fundingNeeds().filter { it.third.firstOrNull()?.isDigit() == true }.joinToString(" and ") { "${it.third} ${it.first}" }.ifEmpty { null }
     /** Rows for the "Time remaining" dialog; null = the prototype's. */
     open fun sessionRows(): List<Pair<String, String>>? = null
     /** Received / sent this session in bytes, when known. */
@@ -206,8 +207,8 @@ open class Engine {
     fun usable(e: Exit) = !e.full && !e.offline
     fun left(id: String = loc): Double = alloc[id] ?: 0.0
     open fun minsLeft(v: Double = left()): Int = max(1, (v / RATE / 60).roundToInt())
-    /** How long the data left here lasts at the current rate, as shown ("1 h 20 min"); null = unknown. */
-    open fun timeLeft(): String? = dur(minsLeft())
+    /** How long the data left here lasts at the current rate, as a phrase ("about 1 h 20 min"); null = unknown. */
+    open fun timeLeft(): String? = "about " + dur(minsLeft())
     fun isOn() = conn == Conn.CONNECTED || conn == Conn.RECONNECTING
     fun heldLeft(id: String): Double { val at = allocAt[id] ?: (t - 600); return max(0.0, HOLD_S - (t - at)) }
     fun warmNow() = warm && t < warmEnd

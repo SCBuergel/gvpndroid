@@ -15,7 +15,6 @@ object GnosisProtocol {
     const val NERD_STATS = """{"type":"nerd_stats"}"""
     const val PROBING_BOOST = """{"type":"probing_boost"}"""
 
-    fun fundingTool(secret: String): String = JSONObject().put("type", "funding_tool").put("secret", secret).toString()
 
     fun connect(destinationId: String): String = JSONObject().put("type", "connect").put("destination", destinationId).toString()
 
@@ -170,23 +169,6 @@ object GnosisProtocol {
         val cur = statusData(reply)?.optJSONObject("conn")?.optJSONObject("wg_stats")?.optJSONObject("current") ?: return null
         return cur.optLong("rx_bytes") to cur.optLong("tx_bytes")
     }
-
-    /** A funding_tool reply as a readable result: (accepted, message). */
-    fun fundingToolResult(reply: String): Pair<Boolean, String> {
-        val d = statusData(reply) ?: return false to (runCatching { JSONObject(reply).optString("error") }.getOrNull()?.takeIf { it.isNotEmpty() } ?: "The core did not answer")
-        return when (d.optString("type")) {
-            "started" -> true to "Code sent. Your funds usually arrive within a few minutes."
-            "in_progress" -> true to "Already redeeming a code. Your funds arrive soon."
-            "done" -> false to "A code was already redeemed for this node."
-            "cooldown" -> false to "Please wait ${d.optLong("remaining") / 1000} s before trying another code."
-            "wrong_phase" -> false to "Codes work only before your node is funded."
-            else -> false to "Unexpected reply: ${d.optString("type")}"
-        }
-    }
-
-    /** The funding tool's last result while waiting for funds (run_mode.funding_tool), if any. */
-    fun fundingToolState(data: JSONObject): String? =
-        data.optJSONObject("run_mode")?.takeIf { it.optString("type") == "preparing_safe" && !it.isNull("funding_tool") }?.optString("funding_tool")
 
     fun chunkBytes(data: JSONObject): Long? = data.takeIf { it.has("pix_chunk_bytes") && !it.isNull("pix_chunk_bytes") }?.optLong("pix_chunk_bytes")
 

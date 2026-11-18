@@ -180,6 +180,7 @@ class GnosisEngineTest {
         assertEquals("0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072", e.address())
         assertEquals("225.35", e.fundingNeeds()[0].third); assertEquals("0.005", e.fundingNeeds()[1].third)
         assertEquals("https://gnosisscan.io/address/0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072", e.explorerUrl())
+        assertEquals("225.35 wxHOPR and 0.005 xDAI", e.fundingAmounts())   // shown under the address
         e.act("gateFund"); assertEquals("I-1w", e.screenCode().first)
         tn.fundingRequest = null; tn.phase = "warmup"; tn.startup = org.gnosisvpn.stub.Tunnel.Startup(5, 19, "Connecting to Gnosis Chain")
         e.tick()
@@ -209,7 +210,7 @@ class GnosisEngineTest {
         e.tick()
         assertEquals(Conn.CONNECTED, e.conn); assertEquals("S01", e.screenCode().first)
         assertEquals(500.0, e.left(), 0.1); assertEquals(350, e.ex(e.loc).ping); assertEquals(30, e.minsLeft())
-        assertEquals("30 min", e.timeLeft())
+        assertEquals("about 30 min", e.timeLeft())
         assertEquals("500 MB left · about 30 min", e.ongoingNote()!!.body)
         assertEquals("660 MB", e.chunkTxt())
         // the core buys the next chunk: "Renewed automatically"
@@ -236,9 +237,40 @@ class GnosisEngineTest {
         val paid = h.notes.last { it.rule == "n8" }
         assertTrue(paid.body, paid.body.startsWith("3 GB added"))
         assertEquals("Payment received.", e.flash?.lead)
-        // Direct page: what the wallet holds, per token
-        assertEquals(true, e.fundingOk(0))
+        // Usage: what the wallet holds, per token; nothing is missing, so no amount to send
+        assertNull(e.fundingAmounts())
         assertTrue(e.fundingNeeds()[0].second.contains("you have 27"))
+    }
+
+    @Test fun timeLeftIsTheCoresEstimateOnly() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 500_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED)
+        e.tick()
+        assertNull("no rate, no estimate", e.timeLeft())
+        assertEquals("500 MB left", e.ongoingNote()!!.body)
+        tn.session = tn.session!!.copy(emptyInSec = 200_000); e.tick()
+        assertEquals("more than a day", e.timeLeft())
+        assertEquals("500 MB left · more than a day", e.ongoingNote()!!.body)
+    }
+
+    @Test fun failedPaymentHasNoInventedCountdown() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 0, stalled = true, awaitingPayment = true, payment = T.Payment.FAILED)
+        e.tick()
+        assertEquals(Pause.RENEWFAIL, e.pause)
+        val m = e.moments().first()
+        assertTrue(m.text, m.text.startsWith("Gnosis VPN keeps trying.")); assertFalse(m.text.contains("{retry}"))
+        assertEquals("Gnosis VPN keeps trying.", e.simpleLine(m).text)
+    }
+
+    @Test fun simpleViewKeepsWarningsAndLockdownText() {
+        val (_, e, _) = setup()
+        assertEquals("", e.simpleLine(Msg(Tone.OK, "check_circle", "Payment received.", "3 GB added.")).text)
+        assertEquals("If the VPN drops, traffic goes direct.", e.simpleLine(Msg(Tone.INFO, "info", "Lockdown off.", "If the VPN drops, traffic goes direct.")).text)
+        assertEquals("If the VPN drops, nothing gets out.", e.simpleLine(Msg(Tone.OK, "check_circle", "Lockdown on.", "If the VPN drops, nothing gets out.")).text)
+        assertEquals("Connect becomes available once it arrives.", e.simpleLine(Msg(Tone.INFO, "hourglass_top", "Waiting for payment…", "Connect becomes available once it arrives.")).text)
     }
 
     @Test fun pausesFollowTheCore() {

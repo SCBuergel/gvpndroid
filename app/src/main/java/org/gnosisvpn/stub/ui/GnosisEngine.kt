@@ -208,7 +208,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                     if (prev != null && bought > prev && conn == Conn.CONNECTED) {
                         allocN++; allocAt[loc] = t
                         setFlash(Tone.OK, "Renewed automatically.", "${mb((bought - prev) / 1e6)} more at ${e.city}.")
-                        fire("u2:$allocN", Note("u2", "Renewing automatically", "${mb((bought - prev) / 1e6)} set aside at ${e.city}. Shown in the app only.", silent = true))
+                        fire("u2:$allocN", Note("u2", "Renewing automatically", "${mb((bought - prev) / 1e6)} more at ${e.city}. Shown in the app only.", silent = true))
                     }
                     lastBought = bought
                 }
@@ -292,7 +292,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
 
     override fun minsLeft(v: Double): Int = session?.emptyInSec?.let { max(1, (it / 60).toInt()) } ?: super.minsLeft(v)
     /** From the core's estimate only (the data left over the current rate); idle traffic has none. */
-    override fun timeLeft(): String? = session?.emptyInSec?.let { sec -> if (sec >= 86_400) "over a day" else dur(max(1, (sec / 60).toInt())) }
+    override fun timeLeft(): String? = session?.emptyInSec?.let { sec -> if (sec >= 86_400) "more than a day" else "about " + dur(max(1, (sec / 60).toInt())) }
 
     /* ---- actions ---- */
     override fun runCheck() { nextCheck = Double.MAX_VALUE }
@@ -348,11 +348,6 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             Triple("xDAI", "Pays network fees · you have ${tokens(w.gas)}", w.gasDeficit?.let { tokens(it) } ?: "Any amount"),
         )
     }
-    override fun fundingOk(i: Int): Boolean? {
-        val w = wallet ?: return null
-        val lvl = if (i == 0) w.trafficLevel else w.gasLevel
-        return lvl == Tunnel.Level.GOOD
-    }
 
     override fun exitTag(e: Exit): String = e.id.removePrefix("0x").take(4).lowercase()
     override fun serverLoad(e: Exit): Int? = e.load?.let { (it * 100).roundToInt().coerceIn(0, 999) }
@@ -383,7 +378,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             return v.setScale(scale, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
         }
 
-        /** The Gnosis VPN funding site (faucet codes). */
+        /** The Gnosis VPN funding site: pays from a wallet, or redeems a funding code, straight to the VPN address. */
         const val FAUCET_URL = "https://faucet.vpn.gnosis.eth.limo/"
         /** Addresses on Gnosis Chain's block explorer. */
         const val EXPLORER_URL = "https://gnosisscan.io/address/"
