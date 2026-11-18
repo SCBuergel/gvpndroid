@@ -15,7 +15,6 @@ object GnosisProtocol {
     const val NERD_STATS = """{"type":"nerd_stats"}"""
     const val PROBING_BOOST = """{"type":"probing_boost"}"""
 
-
     fun connect(destinationId: String): String = JSONObject().put("type", "connect").put("destination", destinationId).toString()
 
     /** Connect reply types meaning "accepted, the tunnel will follow". */

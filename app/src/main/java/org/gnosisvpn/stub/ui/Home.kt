@@ -431,7 +431,7 @@ fun Usage(eng: Engine, cap: String, act: Act) {
             Text(mb(a), style = T.mono.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = p.on)
         }
         Lin((a / eng.chunk).toFloat(), color = if (a <= LOW) p.warn else p.sync, h = 8.dp)
-        val tl = if (a > 0) "Time remaining " + (if (eng.isOn() && eng.sessionRows() == null) dur(minOf(eng.minsLeft(), maxOf(0, ((10800 - eng.connSec) / 60).roundToInt()))) else eng.timeLeft() ?: "—") else "—"
+        val tl = if (a > 0) "Time remaining: " + (if (eng.isOn() && eng.sessionRows() == null) dur(minOf(eng.minsLeft(), maxOf(0, ((10800 - eng.connSec) / 60).roundToInt()))) else eng.timeLeft() ?: "—") else "—"
         Row(
             Modifier.height(32.dp).clip(RoundedCornerShape(8.dp)).clickable { act.go("ui:session") }.padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
