@@ -250,7 +250,7 @@ fun QuotaGraphic(eng: Engine, id: String) {
     val p = LocalPal.current
     val tm = rememberTextMeasurer()
     val ms = frameClock()
-    val per = COST
+    val per = eng.chunk
     val others = eng.alloc.filter { (k, v) -> v > 0 && k != id }.map { it.key to it.value }
     val total = eng.balance + (if (eng.free) per else 0.0) + others.sumOf { it.second }
     val after = if (eng.free) eng.balance else eng.balance - per
@@ -274,7 +274,7 @@ fun QuotaGraphic(eng: Engine, id: String) {
             val u = easeIO(((ms - 300) / 1400.0).coerceIn(0.0, 1.0)).toFloat()
             // the chunk slides into the exit; clipped there, so it never pokes out behind the icon
             clipRect(right = 326f) { drawRoundRect(p.sync, Offset(cx + dx * u, 26f), Size(max(thisW, 8f), 24f), CornerRadius(4f)) }
-            label(tm, "600 MB", cx + thisW / 2, 16f, TextStyle(fontFamily = Mono, fontSize = u(11f), fontWeight = FontWeight.SemiBold, color = p.on), "middle")
+            label(tm, eng.chunkTxt(), cx + thisW / 2, 16f, TextStyle(fontFamily = Mono, fontSize = u(11f), fontWeight = FontWeight.SemiBold, color = p.on), "middle")
             drawPath(Path().apply { moveTo(W + 22, 38f); lineTo(W + 34, 38f); moveTo(W + 29, 33f); lineTo(W + 34, 38f); lineTo(W + 29, 43f) }, p.outline, style = Stroke(1.6f, cap = StrokeCap.Round))
             // the exit it goes to
             val dest = Rect(288f, 24f, 326f, 52f)
@@ -335,6 +335,17 @@ class Viz {
 val GEO = mapOf("nl" to doubleArrayOf(52.4, 4.9), "at" to doubleArrayOf(48.2, 16.4), "de" to doubleArrayOf(52.5, 13.4), "ch" to doubleArrayOf(46.2, 6.1),
     "pt" to doubleArrayOf(38.7, -9.1), "se" to doubleArrayOf(59.3, 18.1), "br" to doubleArrayOf(-23.5, -46.6), "gb" to doubleArrayOf(51.5, -.1),
     "pl" to doubleArrayOf(52.2, 21.0), "kr" to doubleArrayOf(37.6, 127.0))
+/** Rough country centres (lat, lon) for exits named by country code. */
+private val CC_GEO = mapOf(
+    "DE" to doubleArrayOf(51.2, 10.4), "FR" to doubleArrayOf(46.6, 2.4), "GB" to doubleArrayOf(54.0, -2.0), "NL" to doubleArrayOf(52.2, 5.3),
+    "RS" to doubleArrayOf(44.0, 20.9), "PT" to doubleArrayOf(39.6, -8.0), "LT" to doubleArrayOf(55.3, 23.9), "KE" to doubleArrayOf(0.2, 37.9),
+    "ES" to doubleArrayOf(40.2, -3.6), "IT" to doubleArrayOf(42.8, 12.6), "CH" to doubleArrayOf(46.8, 8.2), "AT" to doubleArrayOf(47.6, 14.1),
+    "PL" to doubleArrayOf(52.1, 19.4), "SE" to doubleArrayOf(62.0, 15.0), "FI" to doubleArrayOf(64.0, 26.0), "NO" to doubleArrayOf(61.0, 9.0),
+    "US" to doubleArrayOf(39.8, -98.6), "CA" to doubleArrayOf(56.1, -106.3), "BR" to doubleArrayOf(-14.2, -51.9), "JP" to doubleArrayOf(36.2, 138.3),
+    "SG" to doubleArrayOf(1.35, 103.8), "IN" to doubleArrayOf(20.6, 79.0), "AU" to doubleArrayOf(-25.3, 133.8), "ZA" to doubleArrayOf(-30.6, 22.9),
+    "IE" to doubleArrayOf(53.4, -8.2), "BE" to doubleArrayOf(50.5, 4.5), "CZ" to doubleArrayOf(49.8, 15.5), "RO" to doubleArrayOf(45.9, 24.9),
+    "GR" to doubleArrayOf(39.1, 21.8), "TR" to doubleArrayOf(39.0, 35.2), "UA" to doubleArrayOf(48.4, 31.2), "DK" to doubleArrayOf(56.3, 9.5),
+)
 private val YOU_GEO = doubleArrayOf(47.4, 8.5)
 private fun vec(g: DoubleArray): DoubleArray { val a = g[0] * PI / 180; val b = g[1] * PI / 180; return doubleArrayOf(cos(a) * cos(b), cos(a) * sin(b), sin(a)) }
 private fun geoOf(v: DoubleArray) = doubleArrayOf(asin(v[2].coerceIn(-1.0, 1.0)) * 180 / PI, atan2(v[1], v[0]) * 180 / PI)
@@ -350,7 +361,7 @@ fun TrafficViz(eng: Engine, viz: Viz, modifier: Modifier = Modifier) {
             val dt = min(.1, t - (if (viz.last == 0.0) t else viz.last)); viz.last = t
             val on = eng.isOn(); val conn = eng.conn == Conn.CONNECTING; val e = eng.ex(eng.loc)
             fun exitGeo(): DoubleArray {
-                val g = GEO[eng.loc] ?: doubleArrayOf(50.0, 10.0); val a = vec(YOU_GEO); val b = vec(g)
+                val g = GEO[eng.loc] ?: CC_GEO[e.countryCode] ?: doubleArrayOf(50.0, 10.0); val a = vec(YOU_GEO); val b = vec(g)
                 val ang = acos(min(1.0, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])) * 180 / PI
                 return if (ang >= 34) g else doubleArrayOf(YOU_GEO[0] - 14, YOU_GEO[1] + 34)
             }
@@ -436,7 +447,8 @@ fun TrafficViz(eng: Engine, viz: Viz, modifier: Modifier = Modifier) {
             val base = if (on) 240 + 90 * sin(t / 3) else 60 + 25 * sin(t / 4); val bb = if (blocked) 0.0 else base
             viz.recv += ((bb * 1.5 + if (blocked) 0.0 else 60 * viz.rand()) - viz.recv) * min(1.0, dt * .8)
             viz.sent += ((bb * .42 + if (blocked) 0.0 else 18 * viz.rand()) - viz.sent) * min(1.0, dt * .8)
-            val down = viz.recv * 8 / 1000; val up = viz.sent * 8 / 1000
+            val real = eng.rates()
+            val down = real?.first ?: (viz.recv * 8 / 1000); val up = real?.second ?: (viz.sent * 8 / 1000)
             viz.dpk = max(viz.dpk, down); viz.upk = max(viz.upk, up)
             if (t - viz.bwAt >= .2) { viz.bwAt = t; viz.down = down; viz.up = up }
             viz.nRel = nRel; viz.nVpn = nVpn; viz.nOth = nOth

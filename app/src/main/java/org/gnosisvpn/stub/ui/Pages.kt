@@ -90,7 +90,7 @@ fun PickPage(eng: Engine, act: Act) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             PickRows(eng, act)
             val nFull = eng.exits.count { it.full && eng.fullMsg?.id != it.id }
-            Text(if (!eng.metered) (if (eng.exits.isEmpty()) "Looking for exits…" else "${eng.exits.size} exits") else if (eng.ptab == "recent") "Your last 6 exits · data left there is used first" else "Each new exit sets aside 600 MB · $nFull full exits hidden",
+            Text(if (eng.exits.isEmpty()) "Looking for exits…" else if (eng.ptab == "recent") "Your last 6 exits" else "Each new exit sets aside ${eng.chunkTxt()}" + if (nFull > 0) " · $nFull full exits hidden" else "",
                 style = T.bs, color = p.onV, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp))
         }
     }
@@ -104,7 +104,7 @@ private fun PickRows(eng: Engine, act: Act) {
     var list = when {
         q.isNotEmpty() -> all.filter { it.city.lowercase().contains(q) || it.country.lowercase().contains(q) || it.place.lowercase().contains(q) }
         eng.ptab == "recent" -> eng.recent.mapNotNull { r -> eng.exOrNull(r.id) }.filter { it in all }
-        eng.ptab == "rel" -> all.sortedWith(compareBy({ -it.rel }, { it.ping }))
+        eng.ptab == "rel" -> all.sortedWith(compareBy({ -it.pv }, { -it.fr }, { if (it.measured) it.ping else Int.MAX_VALUE }))
         eng.ptab == "alpha" -> all.sortedBy { it.country }
         else -> all.sortedByDescending { eng.grade(it).sc ?: -2.0 }
     }
@@ -125,7 +125,7 @@ private fun PickRows(eng: Engine, act: Act) {
                 }
                 Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (eng.mode == "auto" && (eng.isOn() || eng.conn == Conn.IDLE) && b != null && b.id == eng.loc) Pill(if (eng.isOn()) "On" else "Selected", PK.ON, "check")
-                    else { Btn(BK.TONAL, if (eng.isOn()) "Switch" else "Connect", { act.go("auto") }, size = BS.SM); if (eng.metered) Price("600 MB") }
+                    else { Btn(BK.TONAL, if (eng.isOn()) "Switch" else "Connect", { act.go("auto") }, size = BS.SM); if (eng.metered) Price("${eng.chunkTxt()}") }
                 }
             }
         }
@@ -181,7 +181,7 @@ private fun ExitRow(eng: Engine, act: Act, x: Exit, on: Boolean, b: Exit?, divid
                     x.offline -> Pill("Offline", PK.BAD)
                     x.full -> Pill("Full", PK.BAD)
                     cur && on -> Pill(if (eng.conn == Conn.PAUSED) "Paused" else "Connected", PK.ON)
-                    else -> { Btn(BK.TONAL, if (on) "Switch" else "Connect", { act.go("pick2", "id" to x.id) }, size = BS.SM); if (eng.metered) Price(if (a > 0) "${a.roundToInt()} MB left" else if (eng.free && !on) "free" else "600 MB") }
+                    else -> { Btn(BK.TONAL, if (on) "Switch" else "Connect", { act.go("pick2", "id" to x.id) }, size = BS.SM); if (eng.metered) Price(if (a > 0) "${a.roundToInt()} MB left" else if (eng.free && !on) "free" else "${eng.chunkTxt()}") }
                 }
             }
         }
@@ -189,7 +189,7 @@ private fun ExitRow(eng: Engine, act: Act, x: Exit, on: Boolean, b: Exit?, divid
         val fm = eng.fullMsg
         if (fm != null && fm.id == x.id) Box(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 10.dp)) {
             MsgCard(Msg(Tone.WARN, "block", "${x.city} just filled up.", fm.alt?.let { "Next most reliable: ${eng.ex(it).city}." } ?: "",
-                fm.alt?.let { listOf("${if (on) "Switch" else "Connect"} to ${eng.ex(it).country} · 600 MB" to "pick2:$it") }), { a2, d -> if (a2.startsWith("pick2:")) act.go("pick2", "id" to a2.substringAfter(":")) else act(a2, d) })
+                fm.alt?.let { listOf("${if (on) "Switch" else "Connect"} to ${eng.ex(it).country} · ${eng.chunkTxt()}" to "pick2:$it") }), { a2, d -> if (a2.startsWith("pick2:")) act.go("pick2", "id" to a2.substringAfter(":")) else act(a2, d) })
         }
     }
 }
@@ -201,7 +201,7 @@ private fun HoldPill(eng: Engine, id: String) {
     val m = (eng.heldLeft(id) / 60).roundToInt()
     Tip("Data you left here. It stays for ${dur(m)}, then it is gone.") {
         Row(Modifier.height(20.dp).clip(RoundedCornerShape(10.dp)).background(p.sc).padding(start = 5.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val f = (a / COST).coerceIn(0.0, 1.0).toFloat()
+            val f = (a / eng.chunk).coerceIn(0.0, 1.0).toFloat()
             androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
                 val sw = size.width * 3f / 14f; val r = size.width * 5f / 14f
                 drawCircle(p.track, r, style = androidx.compose.ui.graphics.drawscope.Stroke(sw))
@@ -213,15 +213,15 @@ private fun HoldPill(eng: Engine, id: String) {
 }
 
 private val STAT_TIPS = mapOf("Latency" to "Round trip through the relay to the exit and back.", "Checked" to "When this exit was last measured.",
-    "Path" to "Quality of the best path through the mixnet. Below 90 % counts as a weak route.", "Relays" to "Distinct first relays the route can use.",
+    "Path" to "Quality of the best path through the mixnet. Below 90 % counts as a weak route.", "Relays" to "Different first relays the route can start with.",
     "Load" to "How busy the exit is: used slots out of all slots.", "Cost" to "Data set aside from your balance when you connect here.")
 
 @Composable
 private fun RowStats(eng: Engine, e: Exit) {
     val p = LocalPal.current
-    val a = eng.left(e.id); val m = e.measured; val load = if (e.slots > 0) ((1 - e.spots.toDouble() / e.slots) * 100).roundToInt() else null
-    val items = listOf("Latency" to (if (m) "${e.ping.grouped()} ms" else "—"), "Checked" to "${(eng.t % 30).toInt()} s ago", "Path" to "${(e.pv * 100).roundToInt()}%",
-        "Relays" to "${minOf(e.fr, 3)} of 3", "Load" to (if (m && load != null) "$load%" else "—"), "Cost" to (if (a > 0) "0 MB · ${a.roundToInt()} left" else "600 MB"))
+    val a = eng.left(e.id); val m = e.measured; val load = eng.serverLoad(e)
+    val items = listOf("Latency" to (if (m) "${e.ping.grouped()} ms" else "—"), "Checked" to ago(e.checkedAt), "Path" to (if (e.pv > 0) "${(e.pv * 100).roundToInt()}%" else "—"),
+        "Relays" to (if (e.fr > 0) "${e.fr}" else "—"), "Load" to (if (load != null) "$load%" else "—"), "Cost" to (if (a > 0) "${a.roundToInt()} MB left" else eng.chunkTxt()))
     Column(Modifier.padding(start = 66.dp, end = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items.chunked(3).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -272,9 +272,12 @@ private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: Settin
     NoteText(rich("Together, nothing leaves your phone before Gnosis VPN is connected. Lockdown is Android’s **Always-on VPN** with **Block connections without VPN**."))
     if (eng.metered) Text("Renewing", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     if (eng.metered) ListGroup {
-        Li("Hide data use before connecting", "Connect goes straight ahead instead of first showing the 600 MB an exit takes.", "visibility_off", { act.go("togHide") }) { Sw(!eng.popover, { act.go("togHide") }) }
-        Li("Auto-renew sessions", "Adds the next 600 MB by itself when an exit runs low, without asking.", "autorenew", { act.go("togAR") }, divider = true) { Sw(eng.autoRenew, { act.go("togAR") }) }
-        Li("Auto-renew past 4 cycles", "After four renewals in a row, keeps going without checking in with you.", "all_inclusive", { act.go("togP4") }, enabled = eng.autoRenew, divider = true) { Sw(eng.arPast4, { act.go("togP4") }, enabled = eng.autoRenew) }
+        Li("Hide data use before connecting", "Connect goes straight ahead instead of first showing the ${eng.chunkTxt()} an exit takes.", "visibility_off", { act.go("togHide") }) { Sw(!eng.popover, { act.go("togHide") }) }
+        if (eng.autoRenewFixed) Li("Renews automatically", "Gnosis VPN buys the next ${eng.chunkTxt()} by itself when an exit runs low, from your balance.", "autorenew", divider = true)
+        else {
+            Li("Auto-renew sessions", "Adds the next ${eng.chunkTxt()} by itself when an exit runs low, without asking.", "autorenew", { act.go("togAR") }, divider = true) { Sw(eng.autoRenew, { act.go("togAR") }) }
+            Li("Auto-renew past 4 cycles", "After four renewals in a row, keeps going without checking in with you.", "all_inclusive", { act.go("togP4") }, enabled = eng.autoRenew, divider = true) { Sw(eng.arPast4, { act.go("togP4") }, enabled = eng.autoRenew) }
+        }
     }
     Text("App", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     if (eng.update != null) Card(color = p.lavc) {
@@ -301,15 +304,11 @@ private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: Settin
     Text("Logs, for support", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
     ListGroup {
         Li("Export logs", "Saved to a folder you pick.", "download") { Btn(BK.TEXT, "Export", { act.go("logsExport") }, size = BS.SM) }
-        Li("Upload logs", "Sent to support. Check what’s included first.", "upload", divider = true) { Btn(BK.TEXT, "Upload", { act.go("ui:upload") }, size = BS.SM) }
+        if (eng.canUploadLogs) Li("Upload logs", "Sent to support. Check what’s included first.", "upload", divider = true) { Btn(BK.TEXT, "Upload", { act.go("ui:upload") }, size = BS.SM) }
     }
     if (extra.rows.isNotEmpty()) {
         Text("Node", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         ListGroup { extra.rows.forEachIndexed { i, (k, title, sub) -> Li(title, sub, if (k == "dev") "developer_mode" else "badge", { extra.onRow(k) }, divider = i > 0) { Ms("chevron_right", tint = p.onV) } } }
-    }
-    if (debug) {
-        Text("Prototype", style = T.sh, color = p.primaryT, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
-        ListGroup { Li("Demo controls", "Scenarios, network events, time speed, notification rules.", "tune", { act.go("demo") }) { Ms("chevron_right", tint = p.onV) } }
     }
     NoteText(extra.version, center = true)
 }
@@ -317,18 +316,18 @@ private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: Settin
 @Composable
 private fun SettingsUsage(eng: Engine, act: Act) {
     val p = LocalPal.current
-    if (!eng.metered) NoteText("Your balance and data use will show here once the Gnosis VPN core reports them. You can fund your node any time:")
-    if (eng.metered) Card { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Card { Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Available balance", style = T.lbl, color = p.onV)
-        Text(mb(eng.balance), style = T.big, color = p.on)
+        Text(eng.balanceText(), style = T.big, color = p.on)
         Text(eng.usePhrase(), style = T.bm, color = p.onV)
+        eng.fundingNeeds().forEach { (tok, what, _) -> if (what.contains("you have")) Dl(tok, what.substringAfter("you have ").trim() + " " + tok, mono = true, divider = false) }
     } }
-    if (eng.metered && eng.balance <= COST) MsgCard(Msg(if (eng.balance < COST) Tone.BAD else Tone.WARN, "warning", if (eng.balance < COST) "Balance empty:" else "Balance running low:", if (eng.balance < COST) "no renewals left." else "1 renewal left."), act)
+    if (eng.balanceKnown && eng.balance <= eng.chunk) MsgCard(Msg(if (eng.balance < eng.chunk) Tone.BAD else Tone.WARN, "warning", if (eng.balance < eng.chunk) "Balance empty:" else "Balance running low:", if (eng.balance < eng.chunk) "no renewals left." else "1 renewal left."), act)
     ListGroup {
         Li("Send funds directly", "Your address and what to send", "qr_code_2", { act.go("gateDirect") }) { Ms("chevron_right", tint = p.onV) }
         Li("Open funding site", "Pay with crypto from a wallet", "account_balance_wallet", { act.go("funding") }, divider = true) { Ms("open_in_new", tint = p.onV) }
     }
-    if (eng.metered && (eng.isOn() || eng.left() > 0)) {
+    if (eng.isOn() || eng.left() > 0) {
         SectionHead("This exit")
         PadCard { Usage(eng, eng.ex(eng.loc).city, act) }
     }
@@ -345,7 +344,7 @@ fun AddPage(eng: Engine, act: Act) {
         Pad {
             PadCard { Text("Pay with crypto", style = T.tm, color = p.on); Text("Top up your balance with crypto you have left in a wallet. The funding site walks you through it.", style = T.bm, color = p.onV) }
             PadCard { Text("Your VPN address", style = T.lbl, color = p.onV); Address(eng, act, share = true); Text("Paste it on the funding site.", style = T.bs, color = p.onV) }
-            if (eng.pay != null) WaitMsg() else NoteText("Your balance updates about 2 minutes after paying. More payment methods are planned.")
+            if (eng.pay != null) WaitMsg() else NoteText("Your balance updates by itself a few minutes after paying.")
         }
     }
 }
@@ -406,18 +405,17 @@ fun DirectPage(eng: Engine, act: Act) {
                 Text(rich("Send on **Gnosis Chain** only. Other networks won’t arrive."), style = T.bm, color = p.on)
             }
             SectionHead("What to send")
-            val ok = eng.balance >= COST
             ListGroup {
                 eng.fundingNeeds().forEachIndexed { i, (tok, what, amt) ->
                     Li(tok, what, divider = i > 0) {
                         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(amt, style = T.mono.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = p.on)
-                            if (!eng.metered) {} else if (ok) Pill("Sufficient", PK.ON) else Pill("Needed")
+                            when (eng.fundingOk(i)) { true -> Pill("Sufficient", PK.ON); false -> Pill("Needed"); null -> {} }
                         }
                     }
                 }
             }
-            if (eng.pay != null) WaitMsg() else NoteText("Your balance updates by itself, usually within 2 minutes of sending.")
+            if (eng.pay != null) WaitMsg() else NoteText("Your balance updates by itself, usually within a few minutes of sending.")
             Row { Btn(BK.TONAL, "Funding site", { act.go("funding") }, trail = "open_in_new") }
         }
     }
@@ -450,8 +448,8 @@ fun TrafficPage(eng: Engine, act: Act, viz: Viz, mbps: Boolean, toggleUnits: () 
             Text("Tap the numbers to switch between Mbit/s and MB/s.", style = T.bs, color = p.onV)
             @OptIn(ExperimentalLayoutApi::class)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                Legend(p.sync, "${viz.nRel} HOPR relays"); Legend(p.onV, "${viz.nVpn} via VPN"); Legend(p.warn, "${viz.nOth} not via VPN")
-                Text("${viz.nRel + viz.nVpn + viz.nOth} endpoints", style = T.bs, color = p.onV)
+                eng.sessionTotals()?.let { (r, s2) -> Legend(p.sync, "${mb(r / 1e6)} received"); Legend(p.onV, "${mb(s2 / 1e6)} sent") }
+                    ?: Text("Traffic shows here while you are connected.", style = T.bs, color = p.onV)
                 if (!eng.isOn() && eng.lockdown && !eng.ldOffPay) Text("Lockdown: nothing leaves while disconnected", style = T.bs, color = p.lav)
             }
         }
@@ -463,175 +461,9 @@ private fun Legend(c: Color, s: String) = Row(verticalAlignment = Alignment.Cent
     Box(Modifier.size(8.dp).background(c, CircleShape)); Text(s, style = T.bs, color = LocalPal.current.onV)
 }
 
-/* ---------- simulated Android VPN settings (demo engine only) ---------- */
-@Composable
-fun SysVpnPage(eng: Engine, act: Act, openReal: () -> Unit) {
-    val p = LocalPal.current
-    Screen(bg = p.sysBg, top = {
-        Row(Modifier.fillMaxWidth().height(26.dp).background(p.surf), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            Ms("android", size = 15.dp, tint = p.sync); Spacer(Modifier.width(6.dp))
-            Text("ANDROID SYSTEM SETTINGS · SIMULATED", fontFamily = Inter, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp, color = p.onV)
-        }
-        AppBar("Gnosis VPN", { act.go("back") }, bg = p.sysBg, titleStyle = T.hs.copy(fontSize = 24.sp, fontWeight = FontWeight.Normal))
-    }, bottom = { Btn(BK.TONAL, "Back to Gnosis VPN", { act.go("back") }, size = BS.LG, icon = "arrow_back") }) {
-        val hint = when (eng.sysPurpose) {
-            "pay" -> if (eng.lockdown) "To pay, turn off **Block connections without VPN**, then go back to Gnosis VPN." else "Done. Go back to Gnosis VPN to pay."
-            "lockOn" -> if (eng.lockdown) "Lockdown is on again. Go back to Gnosis VPN." else "Turn on **Always-on VPN** and **Block connections without VPN**, then go back."
-            else -> null
-        }
-        if (hint != null) Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.pc).padding(horizontal = 14.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Ms("touch_app", size = 20.dp, tint = p.onPc); Text(rich(hint), style = T.bm, color = p.onPc)
-        }
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(p.sysCard)) {
-            Li("Always-on VPN", "Stay connected to VPN at all times", onClick = { act.go("sysAO") }, minH = 72.dp) { Sw(eng.alwaysOn, { act.go("sysAO") }) }
-            Li("Block connections without VPN", "Only allow connections through this VPN", onClick = { act.go("sysBlock") }, enabled = eng.alwaysOn, divider = true, minH = 72.dp) { Sw(eng.lockdown, { act.go("sysBlock") }, enabled = eng.alwaysOn) }
-            Li("Forget VPN", icon = "delete", enabled = false, divider = true, minH = 72.dp)
-        }
-        Column(Modifier.padding(horizontal = 24.dp, vertical = 12.dp)) {
-            Text(rich("The demo simulates this screen. With the Gnosis backend, the app opens Android’s own VPN settings (Settings.ACTION_VPN_SETTINGS) and reads Always-on and Lockdown when you come back."), style = T.note, color = p.onV)
-            Spacer(Modifier.height(8.dp))
-            Btn(BK.TEXT, "Open Android’s VPN settings", openReal, trail = "open_in_new")
-        }
-    }
-}
-
-/* ---------- demo controls (debug builds) ---------- */
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
-@Composable
-fun DemoPage(eng: Engine, act: Act, ui: UiState) {
-    val p = LocalPal.current
-    Column(Modifier.fillMaxSize().background(p.bg)) {
-        AppBar("Demo controls", { act.go("back") }) { Box(Modifier.padding(end = 12.dp)) { Pill("Prototype", PK.PROTO) } }
-        val tabs = listOf("scenario" to "Scenario", "ntf" to "Notifications")
-        PrimaryTabRow(selectedTabIndex = if (ui.ctlTab == "ntf") 1 else 0, containerColor = p.bg, contentColor = p.primaryT, divider = { Box(Modifier.fillMaxWidth().height(1.dp).background(p.outlineV)) }) {
-            tabs.forEach { (v, l) -> Tab(selected = ui.ctlTab == v, onClick = { ui.ctlTab = v }, text = { Text(l, fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = 14.sp) }, selectedContentColor = p.primaryT, unselectedContentColor = p.onV) }
-        }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) { Pad {
-            H3("Backend")
-            val app = org.gnosisvpn.stub.App.instance
-            Chips {
-                Chip("Demo engine", eng.simulatesSystem) { app.useEngine("demo") }
-                Chip("Gnosis VPN core", !eng.simulatesSystem) { if (!app.useEngine("gnosis")) ui.showSnack("Set up the Gnosis backend first: Settings → Developer screen.") }
-            }
-            Tiny("The demo engine simulates every state of the prototype. The Gnosis engine runs the real core; the scenario controls below only apply to the demo.")
-            if (ui.ctlTab == "ntf") NtfLog(eng) else if (eng.simulatesSystem) Controls(eng, act, ui)
-        } }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun Chips(content: @Composable () -> Unit) = FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
-
-@Composable
-private fun Chip(label: String, on: Boolean = false, code: String? = null, onClick: () -> Unit) {
-    val p = LocalPal.current
-    Row(
-        Modifier.height(32.dp).clip(RoundedCornerShape(8.dp)).background(if (on) p.sc else Color.Transparent)
-            .then(if (on) Modifier else Modifier.border(1.dp, p.outlineV, RoundedCornerShape(8.dp))).clickable(onClick = onClick).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (on) Ms("check", size = 16.dp, tint = p.onSc)
-        if (code != null) Text(code, style = T.mono.copy(fontSize = 10.sp, fontWeight = FontWeight.SemiBold), color = if (on) p.onSc else p.onV)
-        Text(label, fontFamily = Inter, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = if (on) p.onSc else p.on)
-    }
-}
-
-@Composable
-private fun H3(s: String) = Text(s.uppercase(), fontFamily = Inter, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.9.sp, color = LocalPal.current.onV, modifier = Modifier.padding(top = 6.dp))
-
-@Composable
-private fun Tiny(s: String) = Text(s, style = T.bs, color = LocalPal.current.onV)
-
-@Composable
-private fun Controls(eng: Engine, act: Act, ui: UiState) {
-    val p = LocalPal.current
-    val (code, name) = eng.screenCode()
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.surfLo).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("On screen", style = T.lbl, color = p.onV)
-        Row { Text(code, style = T.mono.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold), color = p.primaryT); Text(" $name", style = T.bm, fontWeight = FontWeight.SemiBold, color = p.on) }
-    }
-    H3("Jump to")
-    Chips {
-        Chip("Fund first", eng.gate, "I-1") { act.go("gateRestart") }; Chip("Syncing", eng.syncT != null, "I0") { act.go("restart") }; Chip("Failure", eng.fail != null, "E1") { act.go("failShow") }
-        listOf("s00" to "Fresh start", "s01" to "Connected", "s07" to "Data low", "s08" to "No data left", "s10" to "Exit offline", "s13" to "Balance low", "s14" to "Balance empty",
-            "s18c" to "Waiting for payment", "l1" to "Connection drops", "arc" to "Auto-renew check-in").forEach { (k, l) ->
-            Chip(l, false, if (k == "arc") "S09" else k.uppercase()) { act.go("preset", "v" to k) }
-        }
-    }
-    Tiny("Each jump keeps the notification log, so you can compare what fired.")
-    H3("Settings")
-    Chips {
-        listOf("autoRenew" to "Auto-renew", "topup" to "Top-up message", "warm" to "Fresh launch (measuring)", "popover" to "Show data use before connecting", "lockdown" to "Lockdown", "startConnect" to "Connect at start").forEach { (k, l) ->
-            val on = when (k) { "autoRenew" -> eng.autoRenew; "topup" -> eng.topup; "warm" -> eng.warm; "popover" -> eng.popover; "lockdown" -> eng.lockdown; else -> eng.startConnect }
-            Chip(l, on) { act.go("tgl", "k" to k) }
-        }
-    }
-    Chips { Chip(if (eng.arIntro) "Auto-renew intro: seen · show again" else "Auto-renew intro: armed", !eng.arIntro) { act.go("arReset") } }
-    Tiny("The intro shows once per install, the next time 600 MB gets set aside with Auto-renew on and data use shown.")
-    H3("Balance")
-    Chips { listOf(4800.0, 1200.0, 600.0, 0.0).forEach { v -> Chip(mb(v), eng.balance == v) { act.go("bal", "v" to v.toInt().toString()) } } }
-    H3("This session")
-    Chips { listOf(600, 300, 120, 60, 20, 5).forEach { v -> Chip("$v MB") { act.go("sess", "v" to "$v") } } }
-    Tiny("Sets what’s left of the current 600 MB at this exit (connects if needed). Runs out at $RATE MB/s, faster with ×10 / ×60. Turn Auto-renew off to see the prompts.")
-    H3("Network events")
-    Chips {
-        Chip("Exit goes offline") { act.go("evOffline") }; Chip("Connection drops") { act.go("evDrop") }; Chip("Payment arrives") { act.go("evPay") }
-        Chip("Update available") { act.go("evUpdate") }; Chip("Two messages") { act.go("evTwo") }
-    }
-    Chips { Chip("Next pick fills up", eng.nextFull) { act.go("tgl", "k" to "nextFull") }; Chip("Renewals fail", eng.failRenew) { act.go("tgl", "k" to "failRenew") } }
-    H3("Time  ${eng.clock()}")
-    Chips { listOf(1, 10, 60).forEach { v -> Chip("×$v", eng.speed == v) { act.go("speed", "v" to "$v") } }; Chip("+5 min") { act.go("skip") } }
-    Tiny("No better-exit suggestions while connected. Auto refreshes the best location every minute while idle.")
-    H3("Phone")
-    Chips { listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (v, l) -> Chip(l, ui.mode == v) { ui.changeMode(v) } } }
-    Chips { Chip("Detailed metrics", !eng.simple) { act.go("view") }; Chip("Screen codes on phone", ui.codes) { ui.codes = !ui.codes }; Chip("Rule notes in notifications", ui.rules) { ui.rules = !ui.rules } }
-    Chips { Chip("Reset everything") { act.go("reset") }; Chip("Clear notification log") { act.go("clearLog") } }
-}
-
-@Composable
-private fun NtfLog(eng: Engine) {
-    val p = LocalPal.current
-    Tiny("What Android shows, at the moment the app posts it, and the rule behind it. Pull down the status bar to see and use them.")
-    if (eng.notes.isEmpty()) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.surfLo).padding(12.dp)) {
-        Text(rich("Nothing sent yet. With Auto-renew on and enough balance the app stays quiet. Try **Data low** or **Balance low** in Jump to, or run time at ×60."), style = T.bs, color = p.onV)
-    }
-    eng.notes.forEach { n ->
-        val r = RULES.first { it.k == n.rule }; val code = n.code ?: r.code.split(" · ").last()
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (n.silent) Color.Transparent else p.surfLo)
-            .then(if (n.silent) Modifier.border(1.dp, p.outlineV, RoundedCornerShape(12.dp)) else Modifier).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(if (n.silent) r.code else if (n.proposed) "Proposed" else code, style = T.mono.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold), color = if (n.proposed) p.warn else p.primaryT)
-                Text(fmtT(n.at), style = T.mono.copy(fontSize = 11.sp), color = p.onV)
-                if (n.gone) Text("dismissed", style = T.bs, color = p.onV)
-            }
-            Text(if (n.silent) "No notification · ${n.title}" else n.title, fontFamily = Inter, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = p.on)
-            Text(n.body, style = T.bs, color = p.on)
-            if (!n.silent) Text(rich("**Why:** ${r.rule}"), style = T.bs, color = p.onV)
-        }
-    }
-    H3("When notifications show up")
-    RULES.forEach { r ->
-        val keys = eng.fired.keys.filter { it.split(":")[0] == r.k }
-        val (st, col) = when {
-            (r.k == "u3" || r.k == "a3") && eng.autoRenew -> "Muted · Auto-renew on" to p.onV
-            r.silent -> "Silent" to p.onV
-            keys.isNotEmpty() -> "Sent ${fmtT(eng.fired[keys.last()]!!)}" to p.okT
-            else -> "Armed" to p.primaryT
-        }
-        RuleRow(r.code, r.name, r.rule, st, col)
-    }
-    RuleRow("Ongoing", "VPN status, while not idle", "Android requires it for a VPN service. Carries Disconnect or the paused action.", if (eng.conn == Conn.IDLE) "Hidden" else "Shown", p.okT)
-    RuleRow("In-app", "Lockdown reconnecting, better exit, renewal failed", "Main screen only. No system notification on the canvas.", "App only", p.onV)
-}
-
-@Composable
-private fun RuleRow(code: String, name: String, rule: String, st: String, col: Color) {
-    val p = LocalPal.current
-    Box(Modifier.fillMaxWidth().height(1.dp).background(p.outlineV))
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(code, style = T.mono.copy(fontSize = 10.sp), color = p.onV, modifier = Modifier.width(56.dp))
-        Column(Modifier.weight(1f)) { Text(name, style = T.bs, color = p.on); Text(rule, fontFamily = Inter, fontSize = 11.sp, lineHeight = 14.sp, color = p.onV) }
-        Text(st, fontFamily = Inter, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = col)
-    }
+/** "12 s ago", "3 min ago", or "—". */
+fun ago(atMs: Long?): String {
+    if (atMs == null) return "—"
+    val s = ((System.currentTimeMillis() - atMs) / 1000).coerceAtLeast(0)
+    return if (s < 90) "$s s ago" else if (s < 5400) "${s / 60} min ago" else "${s / 3600} h ago"
 }

@@ -6,6 +6,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.gnosisvpn.stub.Tunnel as T
 
 /**
  * The engine against the prototype (~/mobile-UI src/shared/engine.js): its scenarios reach the
@@ -13,7 +14,7 @@ import org.junit.Test
  * behave the same. Timers (Handler) are inert in unit tests, so time is advanced with step().
  */
 class EngineTest {
-    private fun engine() = Engine().also { it.reset() }
+    private fun engine() = DemoEngine().also { it.reset() }
 
     private fun Engine.run(seconds: Int) { repeat(seconds) { t += 1; step(1.0) } }
 
@@ -30,7 +31,7 @@ class EngineTest {
     }
 
     @Test fun firstLaunchIsTheFundingGate() {
-        val e = Engine(); e.start()
+        val e = DemoEngine(); e.start()
         assertEquals("I-1", e.screenCode().first)
         e.act("gateDirect")
         assertEquals("I-1d", e.screenCode().first)
@@ -129,7 +130,154 @@ class EngineTest {
     }
 }
 
+/** A backend that reports whatever the test sets: what the Gnosis core would say. */
+class FakeTunnel : org.gnosisvpn.stub.Tunnel {
+    override var state = org.gnosisvpn.stub.Tunnel.State.DISCONNECTED
+    override var locations: List<org.gnosisvpn.stub.Tunnel.Location> = emptyList()
+    override var fundingRequest: org.gnosisvpn.stub.Tunnel.FundingRequest? = null
+    override var phase: String? = null
+    override var startup: org.gnosisvpn.stub.Tunnel.Startup? = null
+    override var failure: String? = null
+    override var session: org.gnosisvpn.stub.Tunnel.Session? = null
+    override var chunkBytes: Long? = 660_160_512
+    override var wallet: org.gnosisvpn.stub.Tunnel.Wallet? = null
+    var counters: org.gnosisvpn.stub.Tunnel.Stats? = null
+    val selected = mutableListOf<String>()
+    var redeemed: String? = null
+    override fun connect() { state = org.gnosisvpn.stub.Tunnel.State.CONNECTING }
+    override fun disconnect() { state = org.gnosisvpn.stub.Tunnel.State.DISCONNECTED }
+    override fun stats() = counters
+    override fun addListener(listener: org.gnosisvpn.stub.Tunnel.Listener) {}
+    override fun removeListener(listener: org.gnosisvpn.stub.Tunnel.Listener) {}
+    override fun selectLocation(location: org.gnosisvpn.stub.Tunnel.Location) { selected += location.id }
+    override fun redeemCode(code: String, done: (ok: Boolean, message: String) -> Unit) { redeemed = code; done(true, "Code sent.") }
+}
+
 class GnosisEngineTest {
+    private fun ger(ping: Int? = 380, free: Int = 4) = org.gnosisvpn.stub.Tunnel.Location("0xe5cE", "GVPN-GER-1", "DE",
+        org.gnosisvpn.stub.Tunnel.ExitHealth("DE", pingMs = ping, slotsTotal = 10, slotsFree = free, pathValue = 0.95, firstRelays = 3, load = 0.3))
+    private fun uk() = org.gnosisvpn.stub.Tunnel.Location("0xE7FD", "Bonnie Prince Charlie", "Edinburgh, UK",
+        org.gnosisvpn.stub.Tunnel.ExitHealth("GB", pingMs = 900, slotsTotal = 10, slotsFree = 8, pathValue = 0.92, firstRelays = 2))
+    private fun wallet(wx: String, lvl: org.gnosisvpn.stub.Tunnel.Level = org.gnosisvpn.stub.Tunnel.Level.GOOD) =
+        org.gnosisvpn.stub.Tunnel.Wallet("0xf9f8", java.math.BigDecimal(wx), java.math.BigDecimal("0.004"), lvl, org.gnosisvpn.stub.Tunnel.Level.GOOD,
+            dataBytes = java.math.BigDecimal(wx).divide(java.math.BigDecimal("0.000000009"), java.math.MathContext.DECIMAL64).toLong())
+
+    private class Hooks : EngineHooks {
+        var connects = 0; var disconnects = 0; val notes = mutableListOf<Note>()
+        override fun connectVpn() { connects++ }
+        override fun disconnectVpn() { disconnects++ }
+        override fun notify(note: Note) { notes += note }
+    }
+
+    private fun setup(): Triple<FakeTunnel, GnosisEngine, Hooks> {
+        val tn = FakeTunnel(); val h = Hooks()
+        val e = GnosisEngine({ tn }); e.hooks = h; e.start()
+        return Triple(tn, e, h)
+    }
+    private fun GnosisEngine.tick(n: Int = 1) = repeat(n) { t += 1; step(1.0) }
+
+    @Test fun fundingGateThenStartupThenRunning() {
+        val (tn, e, h) = setup()
+        tn.fundingRequest = org.gnosisvpn.stub.Tunnel.FundingRequest("0xf9f8a1C7", "225.35 wxHOPR + 0.005 xDAI"); tn.phase = "preparing_safe"
+        e.tick()
+        assertEquals("I-1", e.screenCode().first)
+        assertEquals("0xf9f8a1C7", e.address())
+        assertEquals("225.35", e.fundingNeeds()[0].third); assertEquals("0.005", e.fundingNeeds()[1].third)
+        e.act("redeem", mapOf("v" to "CODE-1")); assertEquals("CODE-1", tn.redeemed); assertEquals("I-1w", e.screenCode().first)
+        tn.fundingRequest = null; tn.phase = "warmup"; tn.startup = org.gnosisvpn.stub.Tunnel.Startup(5, 19, "Connecting to Gnosis Chain")
+        e.tick()
+        assertEquals("I0", e.screenCode().first); assertEquals("Connecting to Gnosis Chain", e.syncStep())
+        assertTrue(e.syncProgress() in 0.2f..0.4f)
+        assertTrue("payment noted", h.notes.any { it.rule == "n8" })
+        tn.phase = "running"; tn.startup = null; tn.locations = listOf(ger(), uk())
+        e.tick()
+        assertEquals("F2", e.screenCode().first)
+        assertEquals("Germany", e.ex(e.loc).country)   // best: lower latency, better path
+        assertEquals("e5ce", e.exitTag(e.ex(e.loc)))
+    }
+
+    @Test fun connectedSessionShowsRealData() {
+        val (tn, e, h) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger(), uk()); tn.wallet = wallet("54")   // 6 GB at the configured price
+        e.tick()
+        assertEquals("6 GB", e.balanceText())
+        e.act("connect")
+        assertEquals(1, h.connects); assertEquals(listOf("0xe5cE"), tn.selected)
+        tn.state = T.State.CONNECTING
+        tn.session = T.Session("0xe5cE", 1, step = 4, steps = 10, stepName = "Registering with the exit")
+        e.tick()
+        assertEquals(Conn.CONNECTING, e.conn); assertEquals("Registering with the exit", e.connectStep()); assertEquals(0.5f, e.connectFrac()!!, 0.01f)
+        tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, pingMs = 350, chunkBytes = 660_160_512, bytesLeft = 500_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED, emptyInSec = 1800)
+        e.tick()
+        assertEquals(Conn.CONNECTED, e.conn); assertEquals("S01", e.screenCode().first)
+        assertEquals(500.0, e.left(), 0.1); assertEquals(350, e.ex(e.loc).ping); assertEquals(30, e.minsLeft())
+        assertEquals("660 MB", e.chunkTxt())
+        // the core buys the next chunk: "Renewed automatically"
+        tn.session = tn.session!!.copy(bytesLeft = 1_100_000_000, bytesBought = 1_320_321_024)
+        e.tick()
+        assertEquals("S05", e.screenCode().first)
+        assertFalse("renewals are silent", h.notes.any { it.rule == "u2" })
+        // disconnect from the app
+        e.act("disconnect"); assertEquals(1, h.disconnects)
+        tn.state = T.State.DISCONNECTED; tn.session = null; e.tick()
+        assertEquals(Conn.IDLE, e.conn)
+    }
+
+    @Test fun balanceLevelsAndPayments() {
+        val (tn, e, h) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("5", T.Level.LOW)
+        e.tick()
+        assertTrue("balance low", h.notes.any { it.rule == "u4" })
+        assertTrue(e.balance <= e.chunk)
+        tn.wallet = wallet("0", T.Level.EMPTY); e.tick()
+        assertTrue("balance empty", h.notes.any { it.rule == "u5" })
+        assertEquals("Add data", e.moments().first().btns?.first()?.first)
+        tn.wallet = wallet("27"); e.tick()
+        val paid = h.notes.last { it.rule == "n8" }
+        assertTrue(paid.body, paid.body.startsWith("3 GB added"))
+        assertEquals("Payment received.", e.flash?.lead)
+        // Direct page: what the wallet holds, per token
+        assertEquals(true, e.fundingOk(0))
+        assertTrue(e.fundingNeeds()[0].second.contains("you have 27"))
+    }
+
+    @Test fun pausesFollowTheCore() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger(), uk()); tn.wallet = wallet("0", T.Level.EMPTY)
+        tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 0, stalled = true, awaitingPayment = true, payment = T.Payment.PENDING)
+        e.tick()
+        assertEquals("S14", e.screenCode().first)
+        tn.wallet = wallet("10"); tn.session = tn.session!!.copy(payment = T.Payment.FAILED); e.tick()
+        assertEquals("S16", e.screenCode().first)
+        // the exit went away while reconnecting
+        tn.locations = listOf(ger().copy(health = ger().health!!.copy(reachable = false, unrecoverable = true)), uk())
+        tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick()
+        assertEquals("S10", e.screenCode().first)
+        e.act("bestAvail")
+        assertEquals("0xE7FD", tn.selected.last())
+    }
+
+    @Test fun noDemoActions() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); e.tick()
+        val before = e.screenCode()
+        for (a in listOf("preset", "evOffline", "evPay", "gatePaid", "sess", "bal", "skip", "failShow")) e.act(a, mapOf("v" to "s14"))
+        assertEquals(before, e.screenCode())
+        assertFalse(e.simulatesSystem)
+        assertEquals(0.0, e.balance, 0.0)   // nothing invented before the wallet is known
+        assertEquals("—", e.balanceText())
+    }
+
+    @Test fun throughputFromCounters() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 600_000_000)
+        tn.counters = T.Stats(0, 0, null); e.tick()
+        assertNotNull(e.rates())
+    }
+
     @Test fun countryCodesFromPlaces() {
         assertEquals("GB", GnosisEngine.countryCode("Edinburgh, UK"))
         assertEquals("FR", GnosisEngine.countryCode("FR"))

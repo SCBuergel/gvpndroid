@@ -36,11 +36,9 @@ class UiState(initialMode: String, private val saveMode: (String) -> Unit) {
     var mode by mutableStateOf(initialMode)
         private set
     var codes by mutableStateOf(false)
-    var rules by mutableStateOf(true)
     var dialog by mutableStateOf<String?>(null)
     var moreMsgs by mutableStateOf(false)
     var vizMb by mutableStateOf(false)
-    var ctlTab by mutableStateOf("scenario")
     var snack by mutableStateOf<String?>(null)
     var snackSeq by mutableIntStateOf(0)
     fun changeMode(m: String) { mode = m; saveMode(m) }
@@ -65,6 +63,7 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
         when {
             a == "ui:session" -> ui.dialog = "session"
             a == "ui:upload" -> ui.dialog = "upload"
+            a == "ui:redeem" -> ui.dialog = "redeem"
             else -> eng.act(a, d)
         }
     }
@@ -95,8 +94,6 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
                     "payout" -> PayOutPage(eng, act)
                     "direct" -> DirectPage(eng, act)
                     "traffic" -> { LaunchedEffect(Unit) { viz.eps.clear(); viz.c = null; viz.dpk = 0.0; viz.upk = 0.0 }; TrafficPage(eng, act, viz, ui.vizMb) { ui.vizMb = !ui.vizMb } }
-                    "sysvpn" -> SysVpnPage(eng, act, openRealVpnSettings)
-                    "demo" -> DemoPage(eng, act, ui)
                     else -> Box(Modifier)
                 }
             }

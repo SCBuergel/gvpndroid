@@ -26,9 +26,6 @@ object Notifier {
     const val ALERTS = "alerts"
     const val ONGOING_ID = 7
     private const val TAG = "GnosisUi"
-    /** Demo controls → "Rule notes in notifications": the rule code as the notification's sub text. */
-    @Volatile var ruleNotes = true
-    private var lastOngoing: String? = null
 
     fun channels(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -47,13 +44,11 @@ object Notifier {
     /** A rule fired: post it (heads-up on the alerts channel). */
     fun post(ctx: Context, n: Note) {
         Log.i(TAG, "notify ${n.rule} ${n.title}: ${n.body}")
-        val code = n.code ?: RULES.firstOrNull { it.k == n.rule }?.code?.split(" · ")?.last()
         val b = Notification.Builder(ctx, ALERTS)
             .setSmallIcon(R.drawable.ic_vpn_key).setContentTitle(n.title).setContentText(n.body)
             .setStyle(Notification.BigTextStyle().bigText(n.body))
             .setContentIntent(openApp(ctx)).setAutoCancel(true).setCategory(Notification.CATEGORY_STATUS)
             .setDeleteIntent(actionIntent(ctx, n.id, "gone", idOf(n.id) + 1))
-        if (ruleNotes && code != null) b.setSubText(if (n.proposed) "Proposed" else code)
         n.acts.filter { it.second != "nclose" }.forEachIndexed { i, (label, a) ->
             b.addAction(Notification.Action.Builder(null as Icon?, label, actionIntent(ctx, n.id, a, idOf(n.id) + 2 + i)).build())
         }
@@ -62,19 +57,6 @@ object Notifier {
 
     fun cancel(ctx: Context, noteId: String) = ctx.getSystemService(NotificationManager::class.java).cancel(idOf(noteId))
 
-    /** The ongoing VPN-service notification (demo engine; the Gnosis backend's TunnelService posts its own). */
-    fun ongoing(ctx: Context, n: Note?) {
-        val key = n?.let { it.title + "|" + it.body + "|" + it.acts }
-        if (key == lastOngoing) return
-        lastOngoing = key
-        val nm = ctx.getSystemService(NotificationManager::class.java)
-        if (n == null) { nm.cancel(ONGOING_ID); return }
-        val b = Notification.Builder(ctx, org.gnosisvpn.stub.TunnelService.CHANNEL)
-            .setSmallIcon(R.drawable.ic_vpn_key).setContentTitle(n.title).setContentText(n.body)
-            .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(openApp(ctx)).setCategory(Notification.CATEGORY_SERVICE)
-        n.acts.forEachIndexed { i, (label, a) -> b.addAction(Notification.Action.Builder(null as Icon?, label, actionIntent(ctx, "ongoing", a, 50 + i)).build()) }
-        runCatching { nm.notify(ONGOING_ID, b.build()) }
-    }
 }
 
 /** Taps on notification actions (and swipes, "gone") go to the engine. */
@@ -113,22 +95,24 @@ class GnosisTileService : TileService() {
 
 /**
  * Debug builds only (registered in src/debug): drives the engine from adb for testing in redroid.
- *   adb shell am broadcast -n org.gnosisvpn.stub.debug/org.gnosisvpn.stub.ui.DebugActReceiver --es a preset --es v s07
- * Extras: a (action), v, id, k (action arguments), mode (system|light|dark), codes (true|false),
- * engine (demo|gnosis).
+ *   adb shell am broadcast -n org.gnosisvpn.stub.debug/org.gnosisvpn.stub.ui.DebugActReceiver --es a go --es v settings
+ * Extras: a (action), v, id, k (action arguments), mode (system|light|dark), codes (true|false).
  * The resulting screen code is logged: "GnosisUi: screen S07 Data low, Auto-renew off".
  */
 class DebugActReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val app = App.instance
-        intent.getStringExtra("engine")?.let { if (it != (if (app.engine.simulatesSystem) "demo" else "gnosis")) app.useEngine(it) }
         intent.getStringExtra("mode")?.let { app.ui.changeMode(it) }
         intent.getStringExtra("codes")?.let { app.ui.codes = it == "true" }
         intent.getStringExtra("dialog")?.let { app.ui.dialog = it.ifEmpty { null } }
         val a = intent.getStringExtra("a")
         if (a != null) {
             val d = listOf("v", "id", "k").mapNotNull { k -> intent.getStringExtra(k)?.let { k to it } }.toMap()
-            if (a == "back") goBack(app.engine, app.ui) else app.engine.act(a, d)
+            when (a) {
+                "back" -> goBack(app.engine, app.ui)
+                "go" -> app.engine.go(d["v"] ?: "")   // open a page directly, for screenshots
+                else -> app.engine.act(a, d)
+            }
         }
         app.engine.emit()
         val (code, name) = app.engine.screenCode()

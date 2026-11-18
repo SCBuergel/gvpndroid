@@ -21,6 +21,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +70,7 @@ private fun SheetBody(eng: Engine, act: Act, sh: Sheet) {
     when {
         sh.type == "balance" -> {
             Text("Balance", style = T.lbl, color = p.onV)
-            Text(mb(eng.balance), style = T.big, color = p.on)
+            Text(eng.balanceText(), style = T.big, color = p.on)
             Text(eng.usePhrase(), style = T.bm, color = p.onV)
             if (eng.left() > 0) Dl("Left at ${eng.ex(eng.loc).city}", "${eng.left().roundToInt()} MB", mono = true, divider = false)
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -84,31 +89,31 @@ private fun SheetBody(eng: Engine, act: Act, sh: Sheet) {
         sh.type == "quota" -> {
             val l = eng.ex(sh.id); val on = eng.isOn() || eng.conn == Conn.PAUSED
             QuotaGraphic(eng, sh.id)
-            Text(if (sh.intro) "Auto-renew is on." else if (sh.soon) "Internet pauses soon." else if (sh.renew) "600 MB used up." else "${l.city} gets 600 MB.", style = T.hs, color = p.on)
-            val sub = if (sh.intro) "Each exit gets 600 MB. Renews by itself." else if (sh.soon) "About ${dur(eng.minsLeft())} left here. Renew now to keep going." else if (sh.renew) "Renew to keep going." else ""
+            Text(if (sh.intro) "Auto-renew is on." else if (sh.soon) "Internet pauses soon." else if (sh.renew) "${eng.chunkTxt()} used up." else "${l.city} gets ${eng.chunkTxt()}.", style = T.hs, color = p.on)
+            val sub = if (sh.intro) "Each exit gets ${eng.chunkTxt()}. Renews by itself." else if (sh.soon) "About ${dur(eng.minsLeft())} left here. Renew now to keep going." else if (sh.renew) "Renew to keep going." else ""
             if (sub.isNotEmpty()) Text(sub, style = T.bm, color = p.onV)
             if (!sh.renew) Leave(eng, sh.id)
             SheetButtons(Triple(BK.OUTLINED, if (sh.renew) "Not now" else "Cancel") { act.go("sheetNo") }, Triple(BK.FILLED, if (sh.renew) "Renew" else if (on) "Switch" else "Connect") { act.go("sheetGo") })
-            if (sh.intro) SheetLink("Ask me each time") { act.go("arOffGo") } else SheetLink("Turn on Auto-renew") { act.go("arOnGo") }
+            if (!eng.autoRenewFixed) { if (sh.intro) SheetLink("Ask me each time") { act.go("arOffGo") } else SheetLink("Turn on Auto-renew") { act.go("arOnGo") } }
         }
         sh.type == "switch" -> {
             val e = eng.ex(sh.id)
             Text("Switch to ${e.city}?", style = T.hs, color = p.on)
             Text("Unlike traditional VPNs, Gnosis VPN sets aside data from your balance for each exit you use.", style = T.bm, color = p.onV)
-            Flow(eng, listOf("Balance" to mb(eng.balance), e.city to "600 MB"), e.id)
+            Flow(eng, listOf("Balance" to eng.balanceText(), e.city to "${eng.chunkTxt()}"), e.id)
             Leave(eng, e.id)
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { act.go("dont") }.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Checkbox(sh.dont, { act.go("dont") }, colors = CheckboxDefaults.colors(checkedColor = p.primary))
                 Column { Text("Don’t ask again", style = T.bm, color = p.on); Text("Switch right away next time.", style = T.bs, color = p.onV) }
             }
-            SheetButtons(Triple(BK.OUTLINED, "Cancel") { act.go("sheetNo") }, Triple(BK.FILLED, "Switch · 600 MB") { act.go("sheetGo") })
+            SheetButtons(Triple(BK.OUTLINED, "Cancel") { act.go("sheetNo") }, Triple(BK.FILLED, "Switch · ${eng.chunkTxt()}") { act.go("sheetGo") })
         }
         else -> { // nobal
             val e = eng.ex(sh.id); val cur = eng.ex(eng.loc)
             Ms("data_alert", fill = true, size = 32.dp, tint = p.err)
             Text("Not enough data to switch", style = T.hs, color = p.on)
-            Text("Switching would set aside 600 MB for ${e.city}.", style = T.bm, color = p.onV)
-            Flow(eng, listOf("Balance" to mb(eng.balance), "Needed" to "600 MB"), null, badFirst = true)
+            Text("Switching would set aside ${eng.chunkTxt()} for ${e.city}.", style = T.bm, color = p.onV)
+            Flow(eng, listOf("Balance" to eng.balanceText(), "Needed" to "${eng.chunkTxt()}"), null, badFirst = true)
             Text("Your balance is ${if (eng.balance <= 0) "empty" else "too low"}. Add data first${if (eng.isOn()) ", or stay at ${cur.city}" else ""}.", style = T.bm, color = p.onV)
             SheetButtons(Triple(BK.OUTLINED, if (eng.isOn()) "Stay at ${cur.country}" else "Cancel") { act.go("stay") }, Triple(BK.FILLED, "Add data") { act.go("addData") })
         }
@@ -157,11 +162,27 @@ fun DialogHost(eng: Engine, act: Act, ui: UiState) {
             title = { Text("Upload logs to support?", style = T.hs, textAlign = TextAlign.Center, color = p.on) },
             text = { Text("Included: app and connection logs of the last 24 hours, the app version and your phone model. Not included: the sites you visit or your VPN address.", style = T.bm, color = p.onV) },
             dismissButton = { TB("Cancel") { ui.dialog = null } }, confirmButton = { TB("Upload") { ui.dialog = null; act.go("logsUpload") } })
+        "redeem" -> {
+            var code by remember { mutableStateOf("") }
+            AlertDialog(onDismissRequest = { ui.dialog = null }, containerColor = p.surfHi, icon = { DlgIcon("redeem") },
+                title = { Text("Redeem a funding code", style = T.hs, textAlign = TextAlign.Center, color = p.on) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Gnosis VPN sends the code to the funding service, which funds your node directly.", style = T.bm, color = p.onV)
+                        OutlinedTextField(code, { code = it }, singleLine = true, label = { Text("Code") }, modifier = Modifier.fillMaxWidth().testTag("code-field"))
+                    }
+                },
+                dismissButton = { TB("Cancel") { ui.dialog = null } }, confirmButton = { TB("Redeem") { ui.dialog = null; act("redeem", mapOf("v" to code)) } })
+        }
         "session" -> AlertDialog(onDismissRequest = { ui.dialog = null }, containerColor = p.surfHi, icon = { DlgIcon("schedule") },
             title = { Text("Time remaining", style = T.hs, textAlign = TextAlign.Center, color = p.on) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (eng.isOn()) {
+                    val rows = eng.sessionRows()
+                    if (eng.isOn() && rows != null) {
+                        if (rows.isEmpty()) Text("Gnosis VPN reports the data left once the session is running.", style = T.bm, color = p.onV)
+                        rows.forEachIndexed { i, (k, v) -> Dl(k, v, mono = true, divider = i < rows.size - 1) }
+                    } else if (eng.isOn()) {
                         Dl("Data at this rate", dur(eng.minsLeft()), mono = true)
                         Dl("Session expiry", dur(max(0, ((10800 - eng.connSec) / 60).roundToInt())), mono = true, divider = false)
                         Text("Relay channels close after 3 h, because keeping them open costs data. Connecting again opens new ones.", style = T.bm, color = p.onV)

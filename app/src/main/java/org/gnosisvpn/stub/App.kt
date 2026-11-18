@@ -21,37 +21,42 @@ class App : Application() {
         private set
 
     /**
-     * The new UI's state machine: the demo engine (the prototype's simulation) or the Gnosis engine
-     * (the real core through [tunnel]). Chosen in Demo controls → Backend; the default is Gnosis
-     * when this install has the Gnosis backend set up (Developer screen), else the demo.
+     * The UI's state machine over the real Gnosis VPN core ([tunnel]). Created on first use; when
+     * this install has no Gnosis backend yet, it is set up in the background (data files from the
+     * APK), so a fresh install starts on Gnosis VPN without the developer screen.
      */
-    private val engineState = androidx.compose.runtime.mutableStateOf<org.gnosisvpn.stub.ui.Engine?>(null)
-    val engine: org.gnosisvpn.stub.ui.Engine get() = engineState.value ?: makeEngine(engineKind()).also { engineState.value = it }
-    fun engineKind(): String = getSharedPreferences("ui", MODE_PRIVATE).getString("engine", null) ?: if (usesGnosis) "gnosis" else "demo"
-    /** Switches engines; false if the Gnosis backend is not set up. */
-    fun useEngine(kind: String): Boolean {
-        if (kind == "gnosis" && !usesGnosis) return false
-        getSharedPreferences("ui", MODE_PRIVATE).edit().putString("engine", kind).apply()
-        engineState.value?.let { it.stop(); org.gnosisvpn.stub.ui.Notifier.ongoing(this, null) }
-        engineState.value = makeEngine(kind)
-        return true
-    }
-    private fun makeEngine(kind: String): org.gnosisvpn.stub.ui.Engine {
-        val e = if (kind == "gnosis" && usesGnosis) org.gnosisvpn.stub.ui.GnosisEngine { tunnel } else org.gnosisvpn.stub.ui.Engine()
-        return e.also { e ->
+    val engine: org.gnosisvpn.stub.ui.Engine by lazy {
+        org.gnosisvpn.stub.ui.GnosisEngine({ tunnel }, getSharedPreferences("ui", MODE_PRIVATE)).also { e ->
             e.hooks = org.gnosisvpn.stub.ui.AppHooks(this)
             var lastConn: org.gnosisvpn.stub.ui.Conn? = null
             var lastCode = ""
+            var lastNote = ""
             e.onChange = {
-                org.gnosisvpn.stub.ui.Notifier.ruleNotes = ui.rules
-                if (e.simulatesSystem) org.gnosisvpn.stub.ui.Notifier.ongoing(this, e.ongoingNote())
+                val n = e.ongoingNote()
+                val key = n?.let { it.title + it.body + it.acts } ?: ""
+                if (key != lastNote) { lastNote = key; TunnelService.refresh(this) }
                 if (e.conn != lastConn) { lastConn = e.conn; org.gnosisvpn.stub.ui.GnosisTileService.update(this) }
                 val code = e.screenCode().first
                 if (code != lastCode) { lastCode = code; android.util.Log.i("GnosisUi", "screen $code ${e.screenCode().second}") }
             }
             e.start()
+            ensureGnosis()
         }
     }
+
+    /** Sets up the Gnosis backend if this install does not use it yet (off the main thread). */
+    fun ensureGnosis() {
+        if (usesGnosis || !canUseGnosis()) return
+        Thread {
+            runCatching { switchBackend(true) }
+                .onSuccess { android.os.Handler(mainLooper).post { selectBackend(); LogBuffer.log("gnosis backend set up for the app") } }
+                .onFailure { LogBuffer.log("gnosis setup failed: ${it.javaClass.simpleName}: ${it.message}") }
+        }.start()
+    }
+
+    /** Restarts the Gnosis core (after a failure). */
+    fun restartGnosis() { selectBackend() }
+
     val ui: org.gnosisvpn.stub.ui.UiState by lazy {
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)
         org.gnosisvpn.stub.ui.UiState(prefs.getString("mode", "system") ?: "system") { prefs.edit().putString("mode", it).apply() }

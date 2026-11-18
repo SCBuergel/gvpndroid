@@ -27,7 +27,7 @@ class GnosisProtocolTest {
         val expected = fixture.getJSONObject("expected").getJSONArray("locations").let { arr ->
             (0 until arr.length()).map { arr.getJSONArray(it).let { e -> Tunnel.Location(e.getString(0), e.getString(1), e.getString(2)) } }
         }
-        assertEquals(expected, GnosisProtocol.destinations(data).map { it.toLocation() })
+        assertEquals(expected, GnosisProtocol.destinations(data).map { it.toLocation().copy(health = null) })
         assertEquals("running", GnosisProtocol.runMode(data))
         assertNull(GnosisProtocol.fundingRequest(data))
     }

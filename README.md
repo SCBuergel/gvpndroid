@@ -52,46 +52,49 @@ health ping is skipped (the app is excluded from its own VPN), so idle tunnels m
 
 ## New UI
 
-The UI implements the prototype in `~/mobile-UI` (README there: screens, deep links, the
-desktop concepts that were replaced). Its fake backend, `engine.js`, is ported line by line:
+The UI implements the design of the prototype in `~/mobile-UI` (README there: screens, deep
+links) on top of the real Gnosis VPN core. There is no demo backend in the app: every value on
+screen is what the core reports, and what it does not report is not shown.
 
-- `ui/Engine.kt`: the UI's state machine, the prototype's engine in Kotlin, with the same
-  numbers (600 MB per exit, LOW 120, AUTO_AT 30, 4-renewal check-in, 3 h hold, payment about
-  2 min later), rules and copy. It owns the navigation (pages, sheets, the Turn-off dialog) as
-  in the prototype, because the engine itself opens sheets and pages. The UI reads its fields and
-  calls `act(name, args)`; every change bumps `rev`, which recomposes the UI from the root
-  (strong skipping is off for this reason, `app/build.gradle.kts`).
-- `ui/GnosisEngine.kt`: the same engine over the real core (`Tunnel`): funding gate with the
-  node's address and needs, the core's start-up phases, its exits, connect/disconnect through
-  `TunnelService`, Lockdown as Android reports it to the running VpnService. The demo's data
-  accounting (balance, 600 MB per exit, renewals, pauses, latency, live traffic) has no
-  counterpart in client v1.0.0, so `metered` is false and the UI hides it.
-- `ui/Moments.kt`: the main screen's messages, screen codes (S00–S18, F1–F5, L1, P1–P4, I-1,
-  I0, E1) and the ongoing notification. `ui/Home.kt`, `ui/Pages.kt`, `ui/Sheets.kt`: the screens;
-  `ui/Graphics.kt`: the animations (fund visual, connect globe, 600 MB graphic, live traffic);
-  `ui/Theme.kt`: the prototype's light and dark color roles and type (Inter, JetBrains Mono, Doto,
-  fonts in `res/font`: Inter, JetBrains Mono and Doto from google/fonts, SIL Open Font License 1.1).
-- `ui/Platform.kt`: real notifications following the demo's rules (U3–U6, A3, N7/N8 and the
-  proposed ones) with actions, the ongoing VPN notification (demo engine; the Gnosis backend's
-  comes from `TunnelService`), the Quick Settings tile, and the debug-only adb hook.
+- `ui/Engine.kt`: the UI's state machine (navigation, sheets, messages, notification rules,
+  route grades), from the prototype's `engine.js`. The UI reads its fields and calls
+  `act(name, args)`; every change bumps `rev`, which recomposes the UI from the root (strong
+  skipping is off for this reason, `app/build.gradle.kts`).
+- `ui/GnosisEngine.kt`: the engine the app runs, fed from `Tunnel` (`GnosisTunnel`):
+  - start-up: the funding gate (node address, what to send, faucet codes redeemed in the app),
+    then the core's real warm-up stages as progress, or the failure page;
+  - exits: the core's destinations with route health (path value against the core's own 0.9
+    weak-route threshold, first relays), quick-check latency, slots and load;
+  - the session: connect phases, connected, reconnecting, stalls, and the data bought for it
+    (PIX chunks, 660 MB each): data left, renewals (the core renews by itself, so there is no
+    Auto-renew switch), payments pending or failed, an exit that went away;
+  - the wallet (`balance` every 20 s): the Safe's wxHOPR, shown as data at the configured
+    `price_per_byte`, the node's xDAI, the core's low/empty levels; a rise is "Payment received";
+  - live traffic from WireGuard's counters (`nerd_stats`); Lockdown as Android reports it.
+- `ui/Moments.kt`: the main screen's messages, screen codes and the ongoing notification;
+  `ui/Home.kt`, `ui/Pages.kt`, `ui/Sheets.kt`: the screens; `ui/Graphics.kt`: the animations;
+  `ui/Theme.kt`: the light and dark color roles and type (fonts in `res/font`: Inter, JetBrains
+  Mono and Doto from google/fonts, SIL Open Font License 1.1).
+- `ui/Platform.kt`: notifications with actions (balance low/empty, payment received, internet
+  pauses soon, exit went offline), the Quick Settings tile, and the debug-only adb hook. The
+  ongoing VPN notification is `TunnelService`'s, with the app's text and actions.
 
-Which engine runs: Settings → Demo controls → Backend (debug builds). The default is the
-Gnosis engine when the Gnosis backend is set up (Developer screen), else the demo engine.
-Lockdown is Android's Always-on VPN with "Block connections without VPN": the app cannot set
-it, so every Lockdown control opens `Settings.ACTION_VPN_SETTINGS` (the demo engine shows the
-prototype's simulated system screen instead, so the pay flow can be tested).
+A fresh install sets up the Gnosis backend by itself (data files from the APK). Lockdown is
+Android's Always-on VPN with "Block connections without VPN": the app cannot set it, so every
+Lockdown control opens `Settings.ACTION_VPN_SETTINGS` and reads the state on return.
 
-Testing in redroid (debug builds; the receiver needs adb's DUMP permission):
+Tests: `GnosisLiveDataTest` checks the parsers against client v1.0.0's IPC types,
+`GnosisEngineTest` drives the engine over a fake tunnel (gate, start-up, exits, sessions,
+renewals, balance levels, payments, pauses). `EngineTest` keeps the shared state machine on the
+prototype's rules with `DemoEngine`, the prototype's fake backend, which exists only in the
+unit tests.
+
+Testing in redroid (debug builds; the receiver needs adb's DUMP permission) opens pages directly:
 
 ```sh
-adb shell am broadcast -n org.gnosisvpn.stub.debug/org.gnosisvpn.stub.ui.DebugActReceiver --es a preset --es v s07
-adb logcat -s GnosisUi    # "screen S07 Data low, Auto-renew off", "notify u3 …"
-scripts/ui-shots.sh /tmp/shots            # every prototype deep link: app next to prototype
-scripts/ui-shots.sh /tmp/shots s07-d-pick-dark
+adb shell am broadcast -n org.gnosisvpn.stub.debug/org.gnosisvpn.stub.ui.DebugActReceiver --es a go --es v settings
+adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 …"
 ```
-
-`EngineTest` checks the port against the prototype: scenarios reach their screen codes,
-renewals, notification rules, the pay-outside-the-VPN flow, grades and exit ids.
 
 Building with redroid running leaves too little memory on this machine: stop it
 (`scripts/emulator.sh stop`) for the build, start it again to test.

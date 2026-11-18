@@ -49,7 +49,7 @@ class UiActivity : ComponentActivity() {
         val version = packageManager.getPackageInfo(packageName, 0).versionName ?: ""
         val extra = SettingsExtra(
             rows = listOf(Triple("dev", "Developer screen", "Backends, node identity, raw logs")),
-            version = "Gnosis VPN $version" + if (app.engine.simulatesSystem) " · demo engine" else "",
+            version = "Gnosis VPN $version",
             onRow = { k -> if (k == "dev") startActivity(Intent(this, MainActivity::class.java)) },
         )
         setContent { GnosisApp(app.engine, app.ui, debug, extra) { openVpnSettings() } }   // app.engine is observable state
@@ -83,7 +83,7 @@ class UiActivity : ComponentActivity() {
 
     private var returningFromSettings = false
     fun openVpnSettings() {
-        returningFromSettings = !App.instance.engine.simulatesSystem
+        returningFromSettings = true
         runCatching { startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }.onFailure { toast("VPN settings are not available on this device.") }
     }
 
@@ -138,4 +138,5 @@ class AppHooks(private val ctx: Context) : EngineHooks {
         }
     }
     override fun disconnectVpn() = TunnelService.start(ctx, TunnelService.ACTION_DISCONNECT)
+    override fun restartBackend() = app.restartGnosis()
 }

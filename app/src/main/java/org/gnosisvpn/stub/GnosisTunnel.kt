@@ -54,6 +54,32 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     override val phase: String? get() = status?.let { GnosisProtocol.runMode(it) }
 
+    @Volatile override var startup: Tunnel.Startup? = null; private set
+    @Volatile override var failure: String? = null; private set
+    @Volatile override var session: Tunnel.Session? = null; private set
+    @Volatile override var chunkBytes: Long? = null; private set
+    @Volatile override var wallet: Tunnel.Wallet? = null; private set
+    @Volatile private var counters: Tunnel.Stats? = null
+    @Volatile private var balanceDue = 0L
+    /** The configured data price (pix_strategy.price_per_byte), in whole wxHOPR per byte. */
+    private val pricePerByte: java.math.BigDecimal? by lazy {
+        runCatching { GnosisProtocol.pricePerByte(File(dir, "gnosis.toml").readText()) }.getOrNull()
+    }
+
+    override fun redeemCode(code: String, done: (ok: Boolean, message: String) -> Unit) {
+        Thread {
+            val r = if (!coreRunning) false to "Gnosis VPN is still starting. Try again in a moment."
+            else GnosisProtocol.fundingToolResult(GnosisNative.command(GnosisProtocol.fundingTool(code.trim())))
+            LogBuffer.log("gnosis: funding code -> ${r.second}")   // never the code itself
+            balanceDue = 0
+            main.post { done(r.first, r.second) }
+        }.start()
+    }
+
+    override fun refreshExits() {
+        if (coreRunning && phase == "running") Thread { GnosisNative.command(GnosisProtocol.PROBING_BOOST) }.start()
+    }
+
     override val selectedLocation: Tunnel.Location?
         get() {
             val wanted = runCatching { loadProps().getProperty("destination") }.getOrNull() ?: return null
@@ -131,12 +157,12 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 LogBuffer.log("gnosis: core stopped")
             }
             fundingRequest = null
-            destinations = emptyList()
+            destinations = emptyList(); session = null; wallet = null; startup = null; failure = null; counters = null
             set(Tunnel.State.DISCONNECTED, null)
         }
     }
 
-    override fun stats(): Tunnel.Stats? = null
+    override fun stats(): Tunnel.Stats? = counters
 
     override fun addListener(listener: Tunnel.Listener) { listeners += listener }
     override fun removeListener(listener: Tunnel.Listener) { listeners -= listener }
@@ -217,10 +243,24 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 val conn = if (level != LogLevel.NORMAL) short(connObj?.toString() ?: "?", 400) else connObj?.optString("type") ?: "?"
                 if (conn != lastConn) { LogBuffer.log("gnosis: connection $conn"); lastConn = conn }
                 destinations = GnosisProtocol.destinations(data)
+                startup = GnosisProtocol.startup(data)
+                failure = GnosisProtocol.failure(data)
+                chunkBytes = GnosisProtocol.chunkBytes(data)
+                // the session names the exit by the core's id; the UI keys exits by address
+                session = GnosisProtocol.session(data)?.let { s -> s.copy(exitId = find(s.exitId)?.address ?: s.exitId) }
+                val now = System.currentTimeMillis()
+                if (runMode == "running" && now >= balanceDue) {
+                    GnosisProtocol.wallet(GnosisNative.command(GnosisProtocol.BALANCE))?.let { w ->
+                        wallet = w.copy(dataBytes = pricePerByte?.let { p -> w.traffic.divide(p, java.math.MathContext.DECIMAL64).toLong() })
+                    }
+                    balanceDue = now + 20_000
+                }
+                counters = if (session != null && runMode == "running") GnosisProtocol.rxTx(GnosisNative.command(GnosisProtocol.NERD_STATS))
+                    ?.let { (rx, tx) -> Tunnel.Stats(rx, tx, null) } else null
                 val names = destinations.joinToString(", ") { it.toLocation().label }
                 if (names != lastDests && names.isNotEmpty()) { LogBuffer.log("gnosis: ${destinations.size} locations: $names"); lastDests = names }
             }
-            Thread.sleep(if (state == Tunnel.State.CONNECTING) 3_000 else 10_000)
+            Thread.sleep(if (session != null || state != Tunnel.State.DISCONNECTED) 2_000 else 4_000)
         }
     }
 

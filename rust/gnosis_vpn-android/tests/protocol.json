@@ -3,7 +3,11 @@
  "commands": {
   "status": "{\"type\":\"status\"}",
   "disconnect": "{\"type\":\"disconnect\"}",
-  "connect": "{\"type\":\"connect\",\"destination\":\"gvpn-ger-1-j9os\"}"
+  "connect": "{\"type\":\"connect\",\"destination\":\"gvpn-ger-1-j9os\"}",
+  "balance": "{\"type\":\"balance\"}",
+  "nerd_stats": "{\"type\":\"nerd_stats\"}",
+  "probing_boost": "{\"type\":\"probing_boost\"}",
+  "funding_tool": "{\"type\":\"funding_tool\",\"secret\":\"EXAMPLE-CODE\"}"
  },
  "status_running": {
   "type": "status",

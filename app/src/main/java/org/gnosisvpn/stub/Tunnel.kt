@@ -14,9 +14,41 @@ interface Tunnel {
     data class Stats(val rxBytes: Long, val txBytes: Long, val lastHandshakeEpochMs: Long?)
 
     /** An exit the user can choose. [id] is stable across app starts. */
-    data class Location(val id: String, val name: String, val place: String) {
+    data class Location(val id: String, val name: String, val place: String, val health: ExitHealth? = null) {
         val label get() = if (place.isEmpty()) name else "$name — $place"
     }
+
+    /**
+     * What the backend measured about an exit; null fields are unknown.
+     * [pathValue] is the best route's quality (0..1), [firstRelays] how many different first relays lead there.
+     */
+    data class ExitHealth(
+        val countryCode: String? = null, val reachable: Boolean = true, val unrecoverable: Boolean = false,
+        val pingMs: Int? = null, val checkedAtMs: Long? = null, val slotsTotal: Int? = null, val slotsFree: Int? = null,
+        val load: Double? = null, val pathValue: Double? = null, val firstRelays: Int? = null, val checking: Boolean = false,
+        val problem: String? = null,
+    )
+
+    /** The live session as the backend reports it (data bought in chunks, paid from the wallet). */
+    data class Session(
+        val exitId: String, val sinceMs: Long, val step: Int? = null, val steps: Int = 0, val stepName: String? = null,
+        val pingMs: Int? = null, val chunkBytes: Long? = null, val bytesLeft: Long? = null, val bytesSpent: Long? = null,
+        val bytesBought: Long? = null, val cost: java.math.BigDecimal? = null, val emptyInSec: Long? = null,
+        val payment: Payment? = null, val stalled: Boolean = false, val awaitingPayment: Boolean = false, val reconnecting: Boolean = false,
+    )
+    enum class Payment { FREE, PENDING, FAILED, FUNDED }
+
+    /** Funds the backend pays with. Token amounts in whole tokens. */
+    data class Wallet(
+        val address: String, val traffic: java.math.BigDecimal, val gas: java.math.BigDecimal,
+        val trafficLevel: Level, val gasLevel: Level, val trafficDeficit: java.math.BigDecimal? = null, val gasDeficit: java.math.BigDecimal? = null,
+        /** [traffic] as data at the backend's price, if it has a fixed one. */
+        val dataBytes: Long? = null,
+    )
+    enum class Level { GOOD, LOW, EMPTY }
+
+    /** The backend's start-up: [step] of [steps] (for progress), a readable [name], or a failure. */
+    data class Startup(val step: Int, val steps: Int, val name: String, val error: String? = null)
 
     /** The backend cannot run until [address] is funded with [need] (on Gnosis Chain). */
     data class FundingRequest(val address: String, val need: String)
@@ -48,6 +80,27 @@ interface Tunnel {
 
     /** The backend's start-up phase ("warmup", "preparing_safe", "deploying_safe", "running"), if it has one. */
     val phase: String? get() = null
+
+    /** Start-up progress while the backend is not running yet. */
+    val startup: Startup? get() = null
+
+    /** The backend stopped and cannot recover by itself (a readable reason). */
+    val failure: String? get() = null
+
+    /** The current session (connecting, connected or reconnecting), if any. */
+    val session: Session? get() = null
+
+    /** Size of one data chunk, if the backend sells data in chunks. */
+    val chunkBytes: Long? get() = null
+
+    /** The backend's wallet, refreshed in the background; null while unknown. */
+    val wallet: Wallet? get() = null
+
+    /** Redeems a funding code (faucet); [done] gets a readable result on the main thread. */
+    fun redeemCode(code: String, done: (ok: Boolean, message: String) -> Unit) { done(false, "Not supported") }
+
+    /** Asks the backend to measure the exits again soon (the user looks at the list). */
+    fun refreshExits() {}
 
     /** How much the backend logs. */
     fun setLogLevel(level: LogLevel) {}

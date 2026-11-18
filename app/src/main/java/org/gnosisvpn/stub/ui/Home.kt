@@ -71,7 +71,7 @@ fun GateScreen(eng: Engine, act: Act, debug: Boolean) {
     Screen(bottom = {
         Btn(BK.FILLED, "Open funding site", { act.go("gateFund") }, size = BS.LG, trail = "open_in_new")
         Btn(BK.OUTLINED, "Send funds directly", { act.go("gateDirect") }, size = BS.LG)
-        if (debug && eng.simulatesSystem) Btn(BK.PROTO, "Payment arrives (prototype)", { act.go("gatePaid") }, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Btn(BK.TEXT, "I have a funding code", { act.go("ui:redeem") }, modifier = Modifier.align(Alignment.CenterHorizontally), icon = "redeem")
     }) {
         Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Logo(); Spacer(Modifier.height(4.dp))
@@ -84,7 +84,7 @@ fun GateScreen(eng: Engine, act: Act, debug: Boolean) {
 }
 
 @Composable
-fun WaitMsg() = MsgCard(Msg(Tone.INFO, "hourglass_top", "Waiting for your payment.", "Usually about 2 minutes."), { _, _ -> })
+fun WaitMsg() = MsgCard(Msg(Tone.INFO, "hourglass_top", "Waiting for your payment.", "Usually a few minutes."), { _, _ -> })
 
 /* ---------- I0: discovering the network ---------- */
 private val SYNC_STEPS = listOf(0 to "Looking for other node runners", 13 to "Determining available routes", 25 to "Opening channels", 40 to "Finding return paths",
@@ -111,7 +111,6 @@ fun SyncScreen(eng: Engine, act: Act, debug: Boolean) {
         val step = SYNC_STEPS.last { t >= it.first || it.first == 0 }.second
         Text(eng.syncStep() ?: step, style = T.tm.copy(fontSize = 15.sp), color = p.on, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).heightIn(min = 22.dp))
         Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (debug && eng.simulatesSystem) Btn(BK.PROTO, "Skip (prototype)", { act.go("syncSkip") })
         }
     }
 }
@@ -137,10 +136,9 @@ fun FailScreen(eng: Engine, act: Act) {
                 }
             }
             SectionHead("Troubleshooting")
-            Text("Check that your phone is online, then try again. If it keeps failing, the docs or support can help. Mention the failure code.", style = T.bm, color = p.on)
+            Text("Check that your phone is online, then try again. If it keeps failing, export the logs and send them with the failure code.", style = T.bm, color = p.on)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Btn(BK.OUTLINED, "Docs", { act.go("docs") }, trail = "open_in_new")
-                Btn(BK.OUTLINED, "Support", { act.go("support") }, trail = "open_in_new")
+                Btn(BK.OUTLINED, "Export logs", { act.go("logsExport") }, icon = "download")
             }
         }
     }
@@ -162,16 +160,17 @@ fun StatusDot(conn: Conn) {
 @Composable
 fun BalanceChip(eng: Engine, act: Act) {
     val p = LocalPal.current
-    val b = eng.balance; val n = (b / COST).toInt(); val f = (b / (COST * 8)).coerceIn(0.0, 1.0).toFloat()
+    val b = eng.balance; val n = (b / eng.chunk).toInt(); val f = (b / (eng.chunk * 8)).coerceIn(0.0, 1.0).toFloat()
     val col = if (n <= 0) p.err else if (n <= 1) p.warn else p.sync
-    Tip("Balance ${mb(b)}") {
+    val txt = eng.balanceText()
+    Tip("Balance $txt") {
         Column(
             Modifier.padding(horizontal = 4.dp).height(32.dp).clip(RoundedCornerShape(8.dp)).background(Color.Transparent)
-                .clickable { act.go("balance") }.semantics { contentDescription = "Balance ${mb(b)}, enough for $n exits" }
+                .clickable { act.go("balance") }.semantics { contentDescription = "Balance $txt, enough for $n exits" }
                 .then(Modifier.background(Color.Transparent)).padding(horizontal = 10.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
         ) {
-            Text(mb(b), style = T.mono.copy(fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.SemiBold), color = p.on)
+            Text(txt, style = T.mono.copy(fontSize = 11.sp, lineHeight = 12.sp, fontWeight = FontWeight.SemiBold), color = p.on, maxLines = 1)
             Lin(f, Modifier.width(44.dp), col, 3.dp)
         }
     }
@@ -253,7 +252,7 @@ fun HomeScreen(eng: Engine, act: Act, moreMsgs: Boolean, toggleMore: () -> Unit)
         // bottom actions, in thumb reach
         Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Btn(BK.MORE, "More locations", { act.go("pick") }, icon = "format_list_bulleted", modifier = Modifier.fillMaxWidth())
-            val blocked = !(a > 0) && !eng.free && eng.balance < COST
+            val blocked = !(a > 0) && !eng.free && eng.short()
             when (c) {
                 Conn.IDLE -> when {
                     eng.topup || (blocked && eng.ldOffPay && eng.pay != null) -> Btn(BK.GO, eng.connLbl(), {}, size = BS.LG, icon = "power_settings_new", enabled = false)
@@ -264,8 +263,8 @@ fun HomeScreen(eng: Engine, act: Act, moreMsgs: Boolean, toggleMore: () -> Unit)
                 Conn.CONNECTED, Conn.RECONNECTING -> Btn(BK.STOP, "Disconnect", { act.go("disconnect") }, size = BS.LG, icon = "power_settings_new")
                 Conn.PAUSED -> {
                     when (eng.pause) {
-                        Pause.NODATA -> Btn(BK.GO, "Renew and reconnect", { act.go("renew") }, size = BS.LG, icon = "autorenew", suffix = "600 MB")
-                        Pause.OFFLINE -> Btn(BK.GO, "Connect to best available", { act.go("bestAvail") }, size = BS.LG, icon = "travel_explore", suffix = "600 MB")
+                        Pause.NODATA -> Btn(BK.GO, "Renew and reconnect", { act.go("renew") }, size = BS.LG, icon = "autorenew", suffix = "${eng.chunkTxt()}")
+                        Pause.OFFLINE -> Btn(BK.GO, "Connect to best available", { act.go("bestAvail") }, size = BS.LG, icon = "travel_explore", suffix = "${eng.chunkTxt()}")
                         Pause.BALANCE -> if (eng.lockdown) Btn(BK.FILLED, "Turn off Lockdown and pay", { act.go("payOut") }, size = BS.LG, icon = "lock_open")
                             else Btn(BK.FILLED, "Add data", { act.go("addData") }, size = BS.LG, icon = "add")
                         else -> Btn(BK.GO, "Retry now", { act.go("renew") }, size = BS.LG, icon = "refresh")
@@ -288,7 +287,7 @@ private fun ConnectBtn(eng: Engine, act: Act) {
 private fun ConnectingSlot(eng: Engine) {
     val p = LocalPal.current
     val now = uptimeFrames()
-    val prog = ((now - eng.cStart).toFloat() / eng.cDur.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val prog = eng.connectFrac() ?: ((now - eng.cStart).toFloat() / eng.cDur.coerceAtLeast(1)).coerceIn(0f, 1f)
     val st = minOf(3, (prog * 4).toInt())
     val e = eng.ex(eng.loc)
     val steps = listOf("Finding relays", "One hop, a new relay per packet", "Securing the tunnel", "Reaching the exit in ${e.city}")
@@ -300,7 +299,6 @@ private fun ConnectingSlot(eng: Engine) {
                 for (i in 0..3) Box(Modifier.size(6.dp).alpha(if (i == st) blink else 1f).background(if (i <= st) p.sync else p.track, CircleShape))
             }
             Text(eng.connectStep() ?: steps[st], style = T.ql, color = p.on, modifier = Modifier.weight(1f))
-            if (eng.metered) Text("4 relays in use", style = T.ql, color = p.onV)
         }
         Lin(prog)
     }
@@ -341,11 +339,11 @@ private fun DetailCard(eng: Engine, act: Act, label: @Composable () -> Unit, chk
                 } else if (c == Conn.PAUSED) when (pz) {
                     Pause.OFFLINE -> { Kv("Exit", "Offline", p.err); Kv("Data lost", "${eng.lost.roundToInt()} MB", mono = true) }
                     Pause.RENEWFAIL -> { Kv("Renewal", "Failed", p.err); Kv("Next try in", eng.retryText(), mono = true) }
-                    else -> { Kv("This session", "0 MB", p.err, mono = true); if (pz == Pause.BALANCE) Kv("Balance", mb(eng.balance), p.err, true) else Kv("Traffic", "Blocked", p.err) }
+                    else -> { Kv("This session", "${a.roundToInt()} MB", p.err, mono = true); if (pz == Pause.BALANCE) Kv("Balance", eng.balanceText(), p.err, true) else Kv("Traffic", "Blocked", p.err) }
                 } else {
-                    Kv("Ping", if (c == Conn.RECONNECTING) "—" else "${e.ping.grouped()} ms", if (c == Conn.RECONNECTING) p.onV else if (e.ping < 500) p.okT else if (e.ping < 900) p.warn else p.err, true)
+                    Kv("Ping", if (c == Conn.RECONNECTING || e.ping <= 0) "—" else "${e.ping.grouped()} ms", if (c == Conn.RECONNECTING) p.onV else if (e.ping < 500) p.okT else if (e.ping < 900) p.warn else p.err, true)
                     if (a > 0 || c == Conn.CONNECTED) Kv("This session", "${a.roundToInt()} MB", if (a <= LOW) p.warn else Color.Unspecified, true)
-                    else if (c == Conn.IDLE) Kv("Sets aside", if (eng.free) "600 MB free" else "600 MB", mono = true)
+                    else if (c == Conn.IDLE) Kv("Sets aside", if (eng.free) "${eng.chunkTxt()} free" else "${eng.chunkTxt()}", mono = true)
                 }
                 if (canDet) Ms(if (eng.details) "expand_less" else "expand_more", tint = p.onV)
             }
@@ -362,8 +360,6 @@ private fun androidx.compose.foundation.layout.RowScope.Kv(k: String, v: String,
     }
 }
 
-private val LOAD = mapOf("nl" to 24, "at" to 31, "de" to 46, "pt" to 38, "ch" to 88, "se" to 20, "br" to 30)
-
 @Composable
 private fun DetailsCard(eng: Engine, act: Act) {
     val p = LocalPal.current
@@ -371,16 +367,15 @@ private fun DetailsCard(eng: Engine, act: Act) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Column(Modifier.weight(1f)) { Text("Latency", style = T.lbl, color = p.onV); Text(if (c == Conn.RECONNECTING) "—" else "${e.ping.grouped()} ms", style = T.mono.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold), color = p.on) }
-                Column(Modifier.weight(1f)) { Text("Server load", style = T.lbl, color = p.onV); Text("${eng.serverLoad(e) ?: LOAD[e.id] ?: 40}%", style = T.mono.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold), color = p.on) }
+                Column(Modifier.weight(1f)) { Text("Latency", style = T.lbl, color = p.onV); Text(if (c == Conn.RECONNECTING || e.ping <= 0) "—" else "${e.ping.grouped()} ms", style = T.mono.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold), color = p.on) }
+                Column(Modifier.weight(1f)) { Text("Server load", style = T.lbl, color = p.onV); Text(eng.serverLoad(e)?.let { "$it%" } ?: "—", style = T.mono.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold), color = p.on) }
             }
             Text("Diagnostics", style = T.lbl, color = p.onV, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
-            Dl("Last checked", "${maxOf(1, (eng.t % 30).toInt())} s ago", mono = true)
-            Dl("Path", "${if (e.rel == 3) 99 else if (e.rel == 2) 95 else 61}%", mono = true)
-            Dl("Relays", "${e.rel} of 3")
+            Dl("Last checked", ago(e.checkedAt), mono = true)
+            Dl("Path", if (e.pv > 0) "${(e.pv * 100).roundToInt()}%" else "—", mono = true)
+            Dl("First relays", if (e.fr > 0) "${e.fr}" else "—")
             Dl("Route", "1 hop")
-            Dl("Open spots", if (e.spots > 0) "Yes" else "No")
-            Dl("Reliability", REL[e.rel] ?: "—", divider = false)
+            Dl("Open spots", if (e.slots > 0) "${e.spots} of ${e.slots}" else "—", divider = false)
             if (eng.left() > 0 && eng.isOn()) Usage(eng, "Usage", act)
         }
     }
@@ -396,8 +391,8 @@ fun Usage(eng: Engine, cap: String, act: Act) {
             Text(cap, style = T.lbl, color = p.onV)
             Text("${a.roundToInt()} MB", style = T.mono.copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold), color = p.on)
         }
-        Lin((a / 600).toFloat(), color = if (a <= LOW) p.warn else p.sync, h = 8.dp)
-        val tl = if (a > 0) "Time remaining " + dur(if (eng.isOn()) minOf(eng.minsLeft(), maxOf(0, ((10800 - eng.connSec) / 60).roundToInt())) else eng.minsLeft()) else "—"
+        Lin((a / eng.chunk).toFloat(), color = if (a <= LOW) p.warn else p.sync, h = 8.dp)
+        val tl = if (a > 0) "Time remaining " + dur(if (eng.isOn() && eng.sessionRows() == null) minOf(eng.minsLeft(), maxOf(0, ((10800 - eng.connSec) / 60).roundToInt())) else eng.minsLeft()) else "—"
         Row(
             Modifier.height(32.dp).clip(RoundedCornerShape(8.dp)).clickable { act.go("ui:session") }.padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),

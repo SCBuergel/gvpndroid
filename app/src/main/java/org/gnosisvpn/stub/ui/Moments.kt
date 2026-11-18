@@ -33,19 +33,19 @@ fun Engine.moment(): Msg? {
         Msg(Tone.LAV, "lock", "Lockdown on.", "Internet is blocked while Gnosis VPN reconnects to ${e.city}.")
     else Msg(Tone.WARN, "warning", "Reconnecting.", "Lockdown is off, so traffic isn’t protected until the connection is back.")
     if (conn == Conn.CONNECTING) return Msg(Tone.INFO, "info", "Connecting to ${e.city}.",
-        if (!metered) "Opening a route through the mixnet." else if (a > 0) "Uses the ${a.roundToInt()} MB left here." else if (free) "Setting aside your free 600 MB at ${e.city}." else "Setting aside 600 MB at ${e.city}.")
+        if (!metered) "Opening a route through the mixnet." else if (a > 0) "Uses the ${a.roundToInt()} MB left here." else if (free) "Setting aside your free ${chunkTxt()} at ${e.city}." else "Setting aside ${chunkTxt()} at ${e.city}.")
     flash?.let { f -> return Msg(f.tone, TONE_ICON[f.tone] ?: "info", f.lead, f.text, f.btns.ifEmpty { null }) }
     if (conn == Conn.IDLE && ldOffPay && pay != null) return Msg(Tone.INFO, "hourglass_top", "Waiting for payment…", "Usually about 2 minutes. Connect becomes available once it arrives.")
     if (conn == Conn.CONNECTED) {
-        if (a <= LOW && !autoRenew) return Msg(Tone.WARN, "warning", "${a.roundToInt()} MB left here.", "About ${dur(minsLeft())} at this rate.", listOf("Renew here · 600 MB" to "renew"))
-        if (a <= LOW && balance < COST) return Msg(Tone.WARN, "warning", "${a.roundToInt()} MB left here.", "Your balance is empty, so the internet pauses when this runs out.", listOf("Add data" to "addData"))
-        if (balance > 0 && balance <= COST) return Msg(Tone.WARN, "warning", "Balance running low.", "${mb(balance)} left, enough for one more renewal.", listOf("Add data" to "addData"))
-        better?.let { bid -> val b = ex(bid); return Msg(Tone.INFO, "info", "Better exit now: ${b.city}.", "${b.ping} ms, faster than ${e.city}.", listOf((if (left(b.id) > 0) "Switch" else "Switch · 600 MB") to "switchBetter", "Not now" to "notNow")) }
+        if (a <= LOW && !autoRenew) return Msg(Tone.WARN, "warning", "${a.roundToInt()} MB left here.", "About ${dur(minsLeft())} at this rate.", listOf("Renew here · ${chunkTxt()}" to "renew"))
+        if (a <= LOW && short()) return Msg(Tone.WARN, "warning", "${a.roundToInt()} MB left here.", "Your balance is empty, so the internet pauses when this runs out.", listOf("Add data" to "addData"))
+        if (balance > 0 && balance <= chunk) return Msg(Tone.WARN, "warning", "Balance running low.", "${mb(balance)} left, enough for one more renewal.", listOf("Add data" to "addData"))
+        better?.let { bid -> val b = ex(bid); return Msg(Tone.INFO, "info", "Better exit now: ${b.city}.", "${b.ping} ms, faster than ${e.city}.", listOf((if (left(b.id) > 0) "Switch" else "Switch · ${chunkTxt()}") to "switchBetter", "Not now" to "notNow")) }
         return null
     }
     if (conn == Conn.IDLE) {
         if (checking) return Msg(Tone.INFO, "radar", "Checking exits…", "Auto keeps the best location up to date until you connect.")
-        if (balance < COST && !(a > 0)) return Msg(Tone.WARN, "warning", "Balance empty.", "Add data to connect again.", listOf("Add data" to "addData"))
+        if (short() && !(a > 0)) return Msg(Tone.WARN, "warning", "Balance empty.", "Add data to connect again.", listOf("Add data" to "addData"))
         if (mode == "manual") return Msg(Tone.INFO, "push_pin", "Selected Location.", "Your pick stays until you change it.")
     }
     return null
@@ -86,7 +86,7 @@ fun Engine.screenCode(): Pair<String, String> {
     val sh = sheet
     if (sh != null && !(sh.type == "quota" && pg != null)) return when (sh.type) {
         "quota" -> if (sh.check) "S09q" to "Auto-renew check-in after 4 renewals" else if (sh.intro) "S04i" to "Auto-renew explained, once per install"
-            else if (sh.renew) "S08q" to "600 MB used up, ask to renew" else "S04q" to "Data use, Auto-renew off"
+            else if (sh.renew) "S08q" to "${chunkTxt()} used up, ask to renew" else "S04q" to "Data use, Auto-renew off"
         "switch" -> "S04" to "Switch, first time"
         "balance" -> "—" to "Balance sheet"
         else -> "S15" to "Not enough data to switch"
@@ -115,7 +115,7 @@ fun Engine.screenCode(): Pair<String, String> {
             if (f.startsWith("Back online")) return "S09" to "Back online"
             if (ldOffPay) return "S18d" to "Connected, Lockdown still off"
             if (a <= LOW && !autoRenew) return "S07" to "Data low, Auto-renew off"
-            if (balance > 0 && balance <= COST) return "S13" to "Balance running low"
+            if (balance > 0 && balance <= chunk) return "S13" to "Balance running low"
             return if (details && !simple) "S02" to "Connected, details open" else "S01" to "Connected"
         }
         Conn.IDLE -> {}
@@ -139,7 +139,7 @@ fun Engine.ongoingNote(): Note? {
         Conn.PAUSED -> {
             val why = when (pause) { Pause.NODATA -> "No data left at ${e.city}."; Pause.OFFLINE -> "${e.city} went offline."; Pause.BALANCE -> "No data and none in your balance."; else -> "Couldn’t renew. Retrying soon." }
             Note("ongoing", "Internet paused", "$why Traffic stays blocked.", when (pause) {
-                Pause.NODATA -> listOf("Renew · 600 MB" to "renew"); Pause.OFFLINE -> listOf("Best available" to "bestAvail")
+                Pause.NODATA -> listOf("Renew · ${chunkTxt()}" to "renew"); Pause.OFFLINE -> listOf("Best available" to "bestAvail")
                 Pause.BALANCE -> listOf("Add data" to "addData"); else -> listOf("Retry" to "renew")
             })
         }

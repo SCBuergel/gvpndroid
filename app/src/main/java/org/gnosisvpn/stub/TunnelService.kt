@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import org.gnosisvpn.stub.ui.ongoingNote
 
 /**
  * Foreground service that owns the tunnel's lifetime and shows the persistent notification.
@@ -29,10 +30,12 @@ class TunnelService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        running = true
         tunnel.addListener(listener)
     }
 
     override fun onDestroy() {
+        running = false
         tunnel.removeListener(listener)
         super.onDestroy()
     }
@@ -71,24 +74,37 @@ class TunnelService : Service() {
         getSystemService(android.app.NotificationManager::class.java).notify(NOTIFICATION_ID, build(state))
     }
 
-    private fun build(state: Tunnel.State): Notification {
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
-        )
-        val stop = PendingIntent.getService(
-            this, 1, Intent(this, TunnelService::class.java).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE
-        )
-        return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setContentTitle("Gnosis VPN (stub)")
-            .setContentText("Tunnel ${state.name.lowercase()}")
-            .setContentIntent(open)
-            .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Disconnect", stop).build())
-            .build()
-    }
+    private fun build(state: Tunnel.State): Notification = build(this, state)
 
     companion object {
+        @Volatile private var running = false
+
+        /** The ongoing notification: what the app shows about the connection, with its actions. */
+        fun build(ctx: Context, state: Tunnel.State): Notification {
+            val note = runCatching { App.instance.engine.ongoingNote() }.getOrNull()
+            val open = PendingIntent.getActivity(ctx, 0,
+                Intent(ctx, org.gnosisvpn.stub.ui.UiActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE)
+            val b = Notification.Builder(ctx, CHANNEL)
+                .setSmallIcon(R.drawable.ic_vpn_key)
+                .setContentTitle(note?.title ?: if (state == Tunnel.State.CONNECTED) "Connected" else "Gnosis VPN")
+                .setContentText(note?.body ?: "Connecting…")
+                .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_SERVICE)
+            val acts = note?.acts ?: listOf("Disconnect" to "disconnect")
+            acts.forEachIndexed { i, (label, a) ->
+                val pi = PendingIntent.getBroadcast(ctx, 50 + i,
+                    Intent(ctx, org.gnosisvpn.stub.ui.NotificationActionReceiver::class.java).putExtra("note", "ongoing").putExtra("act", a),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                b.addAction(Notification.Action.Builder(null, label, pi).build())
+            }
+            return b.build()
+        }
+
+        /** Re-posts the ongoing notification after the app's view of the connection changed. */
+        fun refresh(ctx: Context) {
+            if (!running) return
+            runCatching { ctx.getSystemService(android.app.NotificationManager::class.java).notify(NOTIFICATION_ID, build(ctx, App.instance.tunnel.state)) }
+        }
+
         const val CHANNEL = "vpn"
         const val NOTIFICATION_ID = 1
         const val ACTION_CONNECT = "org.gnosisvpn.stub.CONNECT"

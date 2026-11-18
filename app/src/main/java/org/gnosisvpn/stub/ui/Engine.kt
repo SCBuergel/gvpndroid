@@ -31,8 +31,6 @@ const val BASE_CLOCK = 9 * 3600 + 41 * 60   // the simulated clock starts at 09:
 const val HOLD_S = 3 * 3600.0              // data left at an exit stays 3 h
 const val UPD_V = "1.4.0"
 const val SYNC_LEN = 120.0
-const val FUND_URL = "https://claude.ai/artifact/WjaBGFUNxuHhUnb4ryRAnz"
-const val ADDRESS = "0x7a3f9c2e5b81d0c4e6a2b7d48d1c91e3"
 const val MIN_PATH_VALUE = 0.9
 
 enum class Conn { IDLE, CONNECTING, CONNECTED, RECONNECTING, PAUSED }
@@ -46,6 +44,8 @@ class Exit(
     var routable: Boolean = true, val countryCode: String = id,
 ) {
     fun copy() = Exit(id, city, country, place, ping, rel, spots, slots, pv, fr, measured, busy, full, offline, routable, countryCode)
+    /** When the backend last measured this exit (epoch ms), its load (0..1) and whether a check runs now. */
+    var checkedAt: Long? = null; var load: Double? = null; var checking = false
 }
 
 data class Grade(val k: String, val n: Int, val label: String, val tone: Tone? = null, val sc: Double? = null)
@@ -98,19 +98,6 @@ fun hash32(str: String): Int {
 }
 fun xid(id: String): String = hash32("pub:$id").toUInt().toString(16).padStart(8, '0').take(4)
 
-private fun baseExits() = listOf(
-    Exit("nl", "Amsterdam", "Netherlands", ping = 451, rel = 2, spots = 6, slots = 10, pv = 0.97, fr = 3, measured = true, busy = "Low"),
-    Exit("at", "Vienna", "Austria", ping = 560, rel = 3, spots = 4, slots = 10, pv = 0.95, fr = 4, measured = true, busy = "Low"),
-    Exit("de", "Frankfurt", "Germany", ping = 612, rel = 3, spots = 8, slots = 10, pv = 0.96, fr = 4, measured = true, busy = "Medium"),
-    Exit("pt", "Lisbon", "Portugal", ping = 690, rel = 2, spots = 5, slots = 10, pv = 0.93, fr = 2, measured = false, busy = "Low"),
-    Exit("ch", "Zürich", "Switzerland", ping = 740, rel = 3, spots = 1, slots = 10, pv = 0.91, fr = 3, measured = true, busy = "High"),
-    Exit("se", "Stockholm", "Sweden", ping = 820, rel = 1, spots = 7, slots = 10, pv = 0.84, fr = 2, measured = true, busy = "Low"),
-    Exit("br", "São Paulo", "Brazil", ping = 1307, rel = 2, spots = 9, slots = 10, pv = 0.92, fr = 1, measured = true, busy = "Low"),
-    Exit("gb", "London", "United Kingdom", ping = 380, rel = 3, spots = 0, full = true),
-    Exit("pl", "Warsaw", "Poland", ping = 470, rel = 2, spots = 0, full = true),
-    Exit("kr", "Seoul", "South Korea", ping = 950, rel = 2, spots = 0, full = true),
-).onEach { e -> e.place = e.city; e.city = "${e.country} #${xid(e.id)}" }
-
 /* ---------- formatting ---------- */
 fun mb(v: Double): String = if (v >= 1000) trimZero(String.format(java.util.Locale.ROOT, "%.1f", v / 1000)) + " GB" else "${max(0, v.roundToInt())} MB"
 private fun trimZero(s: String) = if (s.endsWith(".0")) s.dropLast(2) else s
@@ -129,6 +116,8 @@ interface EngineHooks {
     fun openSystemVpnSettings() {}
     fun exportLogs() {}
     fun requestTile() {}
+    /** Restart the backend after a failure. */
+    fun restartBackend() {}
     /** Real backend: ask for VPN consent if needed, then start the tunnel; and stop it. */
     fun connectVpn() {}
     fun disconnectVpn() {}
@@ -142,8 +131,9 @@ open class Engine {
     val rev = mutableIntStateOf(0)
     var hooks: EngineHooks = object : EngineHooks {}
 
-    var exits: MutableList<Exit> = baseExits().toMutableList()
-    private var baseEx = exits.map { it.copy() }
+    var exits: MutableList<Exit> = mutableListOf()
+    /** The exits a fresh engine starts with (none: the backend reports them). */
+    protected open fun initialExits(): List<Exit> = emptyList()
 
     /* ---- state (S in the prototype) ---- */
     var conn = Conn.IDLE; var pause: Pause? = null; var loc = "de"; var mode = "auto"
@@ -166,10 +156,33 @@ open class Engine {
     var cStart = 0L; var cDur = 12000L; private var cTok = 0
     var copiedAt = 0L
     var sysPurpose: String? = null; private var sysBefore = false
-    /** True in the demo engine: Lockdown controls open the simulated system screen. */
-    open val simulatesSystem = true
-    /** The demo's data accounting (balance, 600 MB per exit, renewals). The Gnosis core does not report it yet. */
+    /** True in the tests' demo engine: Lockdown controls open the simulated system screen. */
+    open val simulatesSystem = false
+    /** Data accounting (balance, a chunk of data per exit, renewals) is shown. */
     open val metered = true
+    /** Data set aside per exit, in MB (the core's PIX chunk). */
+    open val chunk: Double get() = COST
+    fun chunkTxt() = mb(chunk)
+    /** Renewing is the backend's job (the Gnosis core buys the next chunk by itself): no Auto-renew switch. */
+    open val autoRenewFixed = false
+    /** Log upload to support exists. */
+    open val canUploadLogs = true
+    /** How far the connect is, 0..1, when the backend reports it; null = time-based. */
+    open fun connectFrac(): Float? = null
+    /** Live throughput in Mbit/s (down, up) when the backend reports it; null = the visual's own estimate. */
+    open fun rates(): Pair<Double, Double>? = null
+    /** The balance is known (the backend reported it); unknown counts as enough. */
+    open val balanceKnown: Boolean get() = true
+    /** Too little balance for another chunk (and the backend said so). */
+    fun short() = balanceKnown && balance < chunk
+    /** The balance as shown (data, or tokens while the data estimate is unknown). */
+    open fun balanceText(): String = mb(balance)
+    /** Funding row [i] of fundingNeeds() is covered (true), missing (false) or unknown (null). */
+    open fun fundingOk(i: Int): Boolean? = balance >= chunk
+    /** Rows for the "Time remaining" dialog; null = the prototype's. */
+    open fun sessionRows(): List<Pair<String, String>>? = null
+    /** Received / sent this session in bytes, when known. */
+    open fun sessionTotals(): Pair<Long, Long>? = null
 
     protected val handler = Handler(Looper.getMainLooper())
 
@@ -190,7 +203,7 @@ open class Engine {
     fun exOrNull(id: String?): Exit? = exits.firstOrNull { it.id == id }
     fun usable(e: Exit) = !e.full && !e.offline
     fun left(id: String = loc): Double = alloc[id] ?: 0.0
-    fun minsLeft(v: Double = left()): Int = max(1, (v / RATE / 60).roundToInt())
+    open fun minsLeft(v: Double = left()): Int = max(1, (v / RATE / 60).roundToInt())
     fun isOn() = conn == Conn.CONNECTED || conn == Conn.RECONNECTING
     fun heldLeft(id: String): Double { val at = allocAt[id] ?: (t - 600); return max(0.0, HOLD_S - (t - at)) }
     fun warmNow() = warm && t < warmEnd
@@ -228,14 +241,14 @@ open class Engine {
 
     /* ---- system notifications: texts ---- */
     private val closeAct = "Close" to "nclose"
-    private fun nUpd() = Note("upd", "Update available", "Gnosis VPN $UPD_V is ready. Restarting takes a few seconds.", listOf("Restart to update" to "updNow", "Later" to "nclose"), proposed = true)
+    protected fun nUpd() = Note("upd", "Update available", "Gnosis VPN $UPD_V is ready. Restarting takes a few seconds.", listOf("Restart to update" to "updNow", "Later" to "nclose"), proposed = true)
     private fun nU1() = Note("u1", "Plenty of data", "Nothing to do, so nothing is sent.", silent = true)
-    private fun nU2() = Note("u2", "Renewing automatically", "600 MB set aside at ${ex(loc).city}. Shown in the app only.", silent = true)
-    private fun nU3() = Note("u3", "Exit running low", "${left().roundToInt()} MB left at ${ex(loc).city}, about ${minsLeft()} min at this rate.", listOf("Renew · 600 MB" to "renew", closeAct))
+    private fun nU2() = Note("u2", "Renewing automatically", "${chunkTxt()} set aside at ${ex(loc).city}. Shown in the app only.", silent = true)
+    private fun nU3() = Note("u3", "Exit running low", "${left().roundToInt()} MB left at ${ex(loc).city}, about ${minsLeft()} min at this rate.", listOf("Renew · ${chunkTxt()}" to "renew", closeAct))
     private fun nU4() = Note("u4", "Balance running low", "${mb(balance)} left. ${usePhrase()}", listOf("Add data" to "addData", closeAct))
     private fun nU5() = Note("u5", "Balance empty", "No data left to renew. Add data to keep browsing.", listOf("Add data" to "addData", closeAct))
     private fun nU6() = Note("u6", "Internet pauses soon", "About ${minsLeft()} min of data left at ${ex(loc).city}.",
-        if (balance >= COST) listOf("Renew · 600 MB" to "renew", closeAct) else listOf("Add data" to "addData", closeAct))
+        if (balance >= chunk) listOf("Renew · ${chunkTxt()}" to "renew", closeAct) else listOf("Add data" to "addData", closeAct))
     private fun nA3() = Note("a3", "Internet paused", "No data left at ${ex(loc).city}. Your traffic stays private while paused.", listOf("Renew and reconnect" to "renew", closeAct))
     private fun nN8(ld: Boolean) = Note("n8", "Payment received", "3 GB added. Your balance is ${mb(balance)}.${if (ld) " Lockdown is still off." else ""}",
         if (ld) listOf("Turn Lockdown back on" to "lockOn", closeAct) else listOf(closeAct), code = if (ld) "N7" else "N8")
@@ -265,20 +278,20 @@ open class Engine {
         if (conn == Conn.CONNECTED) {
             connSec += dt
             alloc[loc] = max(0.0, left() - RATE * dt)
-            val a = left(); val canRenew = balance >= COST
+            val a = left(); val canRenew = balance >= chunk
             if (autoRenew && a <= AUTO_AT && canRenew) autoRenewNow()
             else {
                 if (!autoRenew && a <= LOW) fire("u3:$allocN", nU3())
                 if (a <= SOON && !(autoRenew && canRenew)) fire("u6:$allocN", nU6())
-                // Auto-renew off: ask to renew when the internet is about to pause, once per 600 MB
+                // Auto-renew off: ask to renew when the internet is about to pause, once per ${chunkTxt()}
                 if (a <= SOON && a > 0 && !autoRenew && canRenew && sheet == null && askedSoon != allocN) {
                     askedSoon = allocN; sheet = Sheet("quota", loc, renew = true, soon = true)
                 }
                 if (a <= 0) pauseFor(if (canRenew) Pause.NODATA else Pause.BALANCE)
             }
         }
-        if (balance > 0 && balance <= COST) fire("u4:$balEp", nU4())
-        if (balance < COST && ((conn == Conn.CONNECTED && left() <= LOW) || pause == Pause.BALANCE)) fire("u5:$balEp", nU5())
+        if (balance > 0 && balance <= chunk) fire("u4:$balEp", nU4())
+        if (balance < chunk && ((conn == Conn.CONNECTED && left() <= LOW) || pause == Pause.BALANCE)) fire("u5:$balEp", nU5())
         if (pay != null && t >= pay!!) paymentArrived()
         if (pause == Pause.RENEWFAIL && t >= retryAt) { if (failRenew) retryAt = t + 30 else renewNow() }
         if (conn == Conn.IDLE && mode == "auto" && !checking && page() == null && t >= nextCheck) runCheck()
@@ -293,19 +306,19 @@ open class Engine {
             }
             return
         }
-        if (!arPast4 && arCount >= 4 && balance >= COST * 4) {
+        if (!arPast4 && arCount >= 4 && balance >= chunk * 4) {
             if (arDecl == allocN) { if (left() <= 0) pauseFor(Pause.NODATA); return }
             sheet = Sheet("quota", loc, check = true, until = t + 300); return
         }
         if (failRenew) { pauseFor(Pause.RENEWFAIL); return }
-        balance -= COST; alloc[loc] = left() + COST; allocN++; allocAt[loc] = t; arCount++
-        setFlash(Tone.OK, "Renewed automatically.", "600 MB set aside at ${ex(loc).city}. Tip: switching exits now and then makes your traffic harder to link.")
+        balance -= chunk; alloc[loc] = left() + chunk; allocN++; allocAt[loc] = t; arCount++
+        setFlash(Tone.OK, "Renewed automatically.", "${chunkTxt()} set aside at ${ex(loc).city}. Tip: switching exits now and then makes your traffic harder to link.")
         fire("u2:$allocN", nU2())
     }
 
     open fun pauseFor(reason: Pause) {
         conn = Conn.PAUSED; pause = reason; offConfirm = false; flash = null; fq.clear(); better = null
-        if (reason == Pause.NODATA && !autoRenew) { fire("a3:$allocN", nA3()); if (balance >= COST) sheet = Sheet("quota", loc, renew = true) }
+        if (reason == Pause.NODATA && !autoRenew) { fire("a3:$allocN", nA3()); if (balance >= chunk) sheet = Sheet("quota", loc, renew = true) }
         if (reason == Pause.RENEWFAIL) retryAt = t + 30
         if (reason == Pause.OFFLINE) fire("off:${t.toInt()}", nOff())
     }
@@ -333,12 +346,12 @@ open class Engine {
         }
         if (page() == "pick") back()
         val needs = !(left(id) > 0) && !free
-        if (needs && balance < COST) { sheet = Sheet("nobal", id); emit(); return }
+        if (needs && short()) { sheet = Sheet("nobal", id); emit(); return }
         if (popover && needs && autoRenew && !arIntro) { sheet = Sheet("quota", id, intro = true); emit(); return }   // once per installation
         if (popover && !(left(id) > 0) && !autoRenew) { sheet = Sheet("quota", id); emit(); return }                     // off: ask every time
         doConnect(id)
     }
-    fun connLbl() = if (!popover && !free && !(left(loc) > 0)) "Connect · 600 MB" else "Connect"
+    fun connLbl() = if (!popover && !free && !(left(loc) > 0)) "Connect · ${chunkTxt()}" else "Connect"
 
     open fun doConnect(id: String) {
         val fromPause = conn == Conn.PAUSED
@@ -353,8 +366,8 @@ open class Engine {
     open fun finishConnect(fromPause: Boolean) {
         val id = loc
         if (!(left(id) > 0)) {
-            if (free) free = false else balance -= COST
-            alloc[id] = COST; allocN++; allocAt[id] = t
+            if (free) free = false else balance -= chunk
+            alloc[id] = chunk; allocN++; allocAt[id] = t
         }
         conn = Conn.CONNECTED; connSec = 0.0; firstRun = false
         recent = (listOf(Recent(id, t)) + recent.filter { it.id != id }).take(6).toMutableList()
@@ -365,19 +378,19 @@ open class Engine {
     fun backOnline() {
         if (!autoRenew && !offered) {
             offered = true
-            setFlash(Tone.OK, "Back online.", "600 MB set aside at ${ex(loc).city}. Renew automatically next time?", listOf("Turn on Auto-renew" to "arOn", "Not now" to "dismiss"))
-        } else setFlash(Tone.OK, "Back online.", "600 MB set aside at ${ex(loc).city}.")
+            setFlash(Tone.OK, "Back online.", "${chunkTxt()} set aside at ${ex(loc).city}. Renew automatically next time?", listOf("Turn on Auto-renew" to "arOn", "Not now" to "dismiss"))
+        } else setFlash(Tone.OK, "Back online.", "${chunkTxt()} set aside at ${ex(loc).city}.")
     }
 
     fun renewNow() {
-        if (balance < COST) { if (conn == Conn.PAUSED) pause = Pause.BALANCE else sheet = Sheet("nobal", loc); emit(); return }
+        if (balance < chunk) { if (conn == Conn.PAUSED) pause = Pause.BALANCE else sheet = Sheet("nobal", loc); emit(); return }
         if (failRenew) { if (conn != Conn.PAUSED || pause != Pause.RENEWFAIL) pauseFor(Pause.RENEWFAIL) else retryAt = t + 30; emit(); return }
         val wasPaused = conn == Conn.PAUSED
-        balance -= COST; alloc[loc] = left() + COST; allocN++; allocAt[loc] = t; flash = null; fq.clear()
+        balance -= chunk; alloc[loc] = left() + chunk; allocN++; allocAt[loc] = t; flash = null; fq.clear()
         if (wasPaused) {
             conn = Conn.RECONNECTING; pause = null; offConfirm = false
             later(1800) { if (conn == Conn.RECONNECTING) { conn = Conn.CONNECTED; backOnline() }; emit() }
-        } else setFlash(Tone.OK, "Renewed.", "600 MB set aside at ${ex(loc).city}.")
+        } else setFlash(Tone.OK, "Renewed.", "${chunkTxt()} set aside at ${ex(loc).city}.")
         emit()
     }
 
@@ -397,7 +410,7 @@ open class Engine {
             else setFlash(Tone.OK, "Payment received.", "3 GB added; your balance is $bal. Renew automatically when an exit runs low?", listOf("Turn on Auto-renew" to "arOn", "Not now" to "dismiss"))
         } else if (conn == Conn.PAUSED) { setFlash(Tone.OK, "Payment received.", "3 GB added; your balance is $bal."); if (pause == Pause.BALANCE) pause = Pause.NODATA }
         else if (autoRenew) setFlash(Tone.OK, "Payment received.", "3 GB added; your balance is $bal. Connect when you’re ready; renewals then run on their own.")
-        else setFlash(Tone.OK, "Payment received.", "3 GB added; your balance is $bal. Connecting sets aside 600 MB of it.", listOf("Turn on Auto-renew" to "arOn", "Not now" to "dismiss"))
+        else setFlash(Tone.OK, "Payment received.", "3 GB added; your balance is $bal. Connecting sets aside ${chunkTxt()} of it.", listOf("Turn on Auto-renew" to "arOn", "Not now" to "dismiss"))
     }
 
     fun exitOffline() {
@@ -453,39 +466,10 @@ open class Engine {
     /** The pay flow turned Lockdown off and disconnects (the real engine stops the tunnel). */
     open fun onPayLockdownOff() {}
 
-    /* ---- presets (Demo controls → Jump to) ---- */
-    fun preset(k: String) {
-        val keepNotes = notes; val keepFired = fired
-        val keep = listOf(speed, autoRenew, popover, topup, arPast4, lockdown, alwaysOn, startConnect, icons, simple, details, qsTile)
-        val keepIntro = if (k == "s00") false else arIntro
-        reset()
-        speed = keep[0] as Int; autoRenew = keep[1] as Boolean; popover = keep[2] as Boolean; topup = keep[3] as Boolean
-        arPast4 = keep[4] as Boolean; lockdown = keep[5] as Boolean; alwaysOn = keep[6] as Boolean; startConnect = keep[7] as Boolean
-        icons = keep[8] as String; simple = keep[9] as Boolean; details = keep[10] as Boolean; qsTile = keep[11] as Boolean
-        arIntro = keepIntro; notes = keepNotes; fired = keepFired
-        fun on(id: String, a: Double, sec: Double = 754.0) { loc = id; alloc[id] = a; allocN++; conn = Conn.CONNECTED; connSec = sec; firstRun = false; free = false }
-        when (k) {
-            "s01" -> { on("nl", 560.0, 20.0); balance = 4800.0 }
-            "arc" -> { on("nl", 30.4, 1900.0); balance = 4800.0; autoRenew = true; arPast4 = false; arCount = 4; sheet = Sheet("quota", "nl", check = true, until = t + 300) }
-            "s07" -> { on("br", 126.0); autoRenew = false; balance = 3600.0 }
-            "s08" -> { on("br", 0.0); autoRenew = false; balance = 3600.0; pauseFor(Pause.NODATA) }
-            "s10" -> { on("br", 180.0); balance = 3600.0; exitOffline() }
-            "s13" -> { on("nl", 410.0); balance = 600.0 }
-            "s14" -> { on("br", 0.0); balance = 0.0; pauseFor(Pause.BALANCE) }
-            "s18c" -> { firstRun = false; free = false; balance = 0.0; lockdown = false; ldOffPay = true; pay = t + 120; loc = "br"; mode = "manual" }
-            "l1" -> { on("nl", 410.0); connDrop() }
-        }
-        warm = k == "s00"; warmEnd = t + 180
-        if (conn != Conn.IDLE || k == "s18c") {
-            recent = (listOf(Recent(loc, 0.0)) + listOf("ch", "de", "at", "pt").filter { it != loc }.mapIndexed { i, x -> Recent(x, -3600.0 * (i + 1)) }).take(6).toMutableList()
-        }
-        emit()
-    }
-
     /** fresh() in the prototype: everything back to the first values, exits included. */
     open fun reset() {
         cancelConnect(); handler.removeCallbacksAndMessages(null)
-        exits = baseEx.map { it.copy() }.toMutableList()
+        exits = initialExits().map { it.copy() }.toMutableList()
         conn = Conn.IDLE; pause = null; loc = "de"; mode = "auto"; alloc = mutableMapOf(); allocN = 0; free = false
         balance = 4800.0; added = 4800.0; balEp = 0
         autoRenew = true; lockdown = true; alwaysOn = true; startConnect = true; topup = false; warm = true; warmEnd = 180.0; popover = false
@@ -517,7 +501,6 @@ open class Engine {
             "icons" -> icons = v
             "arReset" -> { arIntro = false; sheet = null; toast("Auto-renew intro will show on the next Connect.") }
             "traffic" -> go("traffic")
-            "demo" -> go("demo")
             "lockTap" -> openSysVpn(null)
             "details" -> details = !details
             "sort" -> sort = v
@@ -545,7 +528,7 @@ open class Engine {
             "payOut" -> go("payout")
             "payGo" -> openSysVpn("pay")
             "addData" -> { sheet = null; if (conn == Conn.PAUSED && pause == Pause.BALANCE && lockdown) go("payout") else go("add") }
-            "funding" -> { hooks.openUrl(fundUrl()); if (pay == null) pay = t + 120; if (simulatesSystem) toast("Prototype: the funding site opens in the browser. The payment lands about 2 min later.") }
+            "funding" -> { hooks.openUrl(fundUrl()); if (pay == null) pay = t + 120 }
             "copy" -> { copiedAt = now(); hooks.copy("VPN address", address()); toast("Address copied") }
             "share" -> hooks.share(address())
             "lockOn" -> openSysVpn("lockOn")
@@ -555,7 +538,6 @@ open class Engine {
             "sheetNo" -> { if (sheet?.check == true) arDecl = allocN; sheet = null }
             "gateFund" -> { hooks.openUrl(fundUrl()); if (pay == null) pay = t + 120 }
             "gateDirect" -> { go("direct"); if (pay == null) pay = t + 120 }
-            "gatePaid" -> { pay = t; paymentArrived() }
             "gateRestart" -> { balance = 0.0; added = 0.0; pay = null; home(); sheet = null; flash = null; fq.clear(); conn = Conn.IDLE; syncT = null; gate = true; fail = null }
             "togHide" -> popover = !popover
             "togAR" -> { autoRenew = !autoRenew; if (autoRenew) offered = true }
@@ -579,10 +561,9 @@ open class Engine {
             }
             "stay" -> { sheet = null; home() }
             "logsExport" -> hooks.exportLogs()
-            "logsUpload" -> toast(if (simulatesSystem) "Logs sent to support." else "Upload isn’t available yet. Export the logs and send the file instead.")
+            "logsUpload" -> toast("Logs sent to support.")
             "nclose" -> {}
             "pick" -> { go("pick"); ptab = "best"; pall = false; q = "" }
-            "go" -> go(v)   // test hook: push a page, as the prototype's deep links do
             "pick2" -> { mode = "manual"; requestConnect(d["id"] ?: return, true); return }
             "ptab" -> ptab = v
             "pall" -> pall = true
@@ -598,45 +579,10 @@ open class Engine {
             "balance" -> sheet = Sheet("balance")
             "sysAO" -> { alwaysOn = !alwaysOn; if (!alwaysOn) lockdown = false }
             "sysBlock" -> if (alwaysOn) lockdown = !lockdown
-            /* demo controls */
-            "preset" -> { preset(v); return }
-            "speed" -> speed = v.toInt()
-            "skip" -> { repeat(300) { t += 1; step(1.0) }; t = Math.round(t).toDouble() }
-            "sess" -> {
-                if (!isOn()) { conn = Conn.CONNECTED; connSec = 0.0; firstRun = false; free = false; pause = null; home() }
-                if (balance < 1200) balance = 4800.0
-                alloc[loc] = v.toDouble(); sheet = null
-                fired.keys.filter { Regex("^(u3|u6|a3|u2)(:|$)").containsMatchIn(it) }.forEach { fired.remove(it) }
-                toast("$v MB left in this session at ${ex(loc).city}.")
-            }
-            "bal" -> { balance = v.toDouble(); if (balance > COST) balEp++ }
-            "evOffline" -> if (conn != Conn.CONNECTING) exitOffline()
-            "evDrop" -> connDrop()
-            "evTwo" -> { ldFeedback(true); update = UPD_V; setFlash(Tone.LAV, "Update available.", "Gnosis VPN $UPD_V is ready.", listOf("Restart to update" to "updNow", "Later" to "updLater")) }
-            "evUpdate" -> if (conn != Conn.CONNECTING) {
-                update = UPD_V; fire("upd:$UPD_V:${t.toInt()}", nUpd())
-                setFlash(Tone.LAV, "Update available.", "Gnosis VPN $UPD_V is ready.", listOf("Restart to update" to "updNow", "Later" to "updLater"))
-            }
-            "updLater" -> flash = fq.removeFirstOrNull()
-            "updNow" -> {
-                val was = isOn(); update = null; flash = null; fq.clear()
-                if (was) {
-                    conn = Conn.RECONNECTING
-                    later(2600) { if (conn == Conn.RECONNECTING) { conn = Conn.CONNECTED; setFlash(Tone.OK, "Updated.", "You're on Gnosis VPN $UPD_V and connected again.") }; emit() }
-                } else setFlash(Tone.OK, "Updated.", "You're on Gnosis VPN $UPD_V.")
-            }
-            "evPay" -> { pay = t; paymentArrived() }
-            "tgl" -> toggle(d["k"] ?: "")
             "fundScreen" -> { go("add"); sheet = null }
             "restart" -> { fail = null; startSync() }
-            "failShow" -> { fail = Failure("Can’t connect to Blokli", "BLINDTEXT"); home(); sheet = null }
             "failRetry" -> { fail = null; startSync() }
             "copyCode" -> { fail?.let { hooks.copy("Failure code", it.code) }; toast("Failure code copied") }
-            "docs" -> toast("Prototype: opens the Gnosis VPN docs in the browser.")
-            "support" -> toast("Prototype: opens support in the browser, with the failure code.")
-            "syncSkip" -> endSync()
-            "reset" -> { val sp = speed; reset(); speed = sp }
-            "clearLog" -> { notes = mutableListOf(); fired = mutableMapOf(); unread = 0 }
         }
         emit()
     }
@@ -644,7 +590,7 @@ open class Engine {
     /** Hooks for a real backend: the user cancelled a connect, or turned the VPN off while paused. */
     open fun onCancel() {}
     open fun onTurnOff() {}
-    open fun address(): String = ADDRESS
+    open fun address(): String = ""
     /* Extension points for a real backend (defaults: the prototype's simulation). */
     open fun syncLen(): Double = SYNC_LEN
     /** Progress of "Discovering the network", 0..1. */
@@ -657,11 +603,10 @@ open class Engine {
     open fun exitTag(e: Exit): String = xid(e.id)
     open fun serverLoad(e: Exit): Int? = null
     /** What to send on "Send funds directly": token, what it pays for, amount. */
-    open fun fundingNeeds(): List<Triple<String, String, String>> =
-        listOf(Triple("wxHOPR", "Pays for your traffic", "234.52"), Triple("xDAI", "Pays network fees", "0.0126"))
-    open fun fundUrl(): String = FUND_URL
+    open fun fundingNeeds(): List<Triple<String, String, String>> = emptyList()
+    open fun fundUrl(): String = ""
 
-    private fun toggle(k: String) {
+    protected fun toggle(k: String) {
         when (k) {
             "autoRenew" -> autoRenew = !autoRenew
             "topup" -> topup = !topup
