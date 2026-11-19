@@ -12,15 +12,16 @@ The SSH key goes in through cloud-init, because the token may not manage account
 import http.client, json, os, sys, time, urllib.error, urllib.request
 
 API = "https://api.digitalocean.com/v2"
+DELETE_TRIES = 4
 TOKEN = open(os.path.expanduser(os.environ.get("DO_TOKEN_FILE", "~/do-api-token"))).read().strip()
 
 
-def call(method, path, body=None):
+def call(method, path, body=None, timeout=60):
     req = urllib.request.Request(API + path, method=method,
                                  data=None if body is None else json.dumps(body).encode(),
                                  headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             t = r.read().decode()
             return r.status, json.loads(t) if t else {}
     except urllib.error.HTTPError as e:
@@ -94,11 +95,20 @@ def create(name, size, region, pubkey_file):
 
 
 def delete(did):
-    st, js = call("DELETE", f"/droplets/{did}")
+    # DELETE is idempotent (404 = already gone): a timeout, reset, 429 or 5xx is tried again; any other
+    # failure ends it at once. Short calls (20 s) and 90 s of verification keep one run within the
+    # deadline helper's 120 s per attempt in the usual case.
+    for i in range(DELETE_TRIES):
+        st, js = call("DELETE", f"/droplets/{did}", timeout=20)
+        if st in (204, 404) or not (st == 0 or st == 429 or st >= 500):
+            break
+        if i < DELETE_TRIES - 1:
+            print(f"delete {did}: {st}, trying again", file=sys.stderr)
+            time.sleep(5)
     if st not in (204, 404):
         sys.exit(f"delete {did} failed: {st} {js}")
-    for _ in range(24):
-        st, _ = call("GET", f"/droplets/{did}")
+    for _ in range(18):
+        st, _ = call("GET", f"/droplets/{did}", timeout=20)
         if st == 404:
             print(f"droplet {did} verified gone")
             return
