@@ -12,6 +12,7 @@ import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -57,12 +58,17 @@ class UiActivity : ComponentActivity() {
 
     override fun onPostCreate(savedInstanceState: Bundle?) {
         super.onPostCreate(savedInstanceState)
-        if (intent?.getBooleanExtra("connect", false) == true) { intent.removeExtra("connect"); connectVpn() }
+        if (pendingConnect.take()) connectVpn()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra("connect", false)) connectVpn()
+        if (pendingConnect.take()) connectVpn()
+    }
+
+    companion object {
+        /** A connect from the tile or a notification waiting for this screen to ask for VPN consent. */
+        val pendingConnect = OneShot(30_000) { SystemClock.elapsedRealtime() }
     }
 
     override fun onResume() {
@@ -134,9 +140,23 @@ class AppHooks(private val ctx: Context) : EngineHooks {
             a != null -> a.connectVpn()
             android.net.VpnService.prepare(ctx) == null -> TunnelService.start(ctx, TunnelService.ACTION_CONNECT)
             // from the tile or a notification without consent yet: the app asks
-            else -> ctx.startActivity(Intent(ctx, UiActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("connect", true))
+            else -> { UiActivity.pendingConnect.arm(); ctx.startActivity(Intent(ctx, UiActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         }
     }
     override fun disconnectVpn() = TunnelService.start(ctx, TunnelService.ACTION_DISCONNECT)
     override fun restartBackend() = app.restartGnosis()
+}
+
+/**
+ * A request taken at most once, within [ttlMs] of being armed. It lives in the process, not in an
+ * intent extra, so a recreated activity, a restored task or another app cannot replay it.
+ */
+class OneShot(private val ttlMs: Long, private val now: () -> Long) {
+    private var armedAt: Long? = null
+    @Synchronized fun arm() { armedAt = now() }
+    @Synchronized fun take(): Boolean {
+        val at = armedAt ?: return false
+        armedAt = null
+        return now() - at <= ttlMs
+    }
 }
