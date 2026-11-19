@@ -145,10 +145,14 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             // Marked as a connect in progress first, so the core's "disconnected" while it switches
             // is not taken for the core giving up.
             connectLoop = true
+            val since = intent.epoch
             Thread {
                 disconnectCore()
-                intent.connect()   // not before a disconnect still running has finished
-                set(Tunnel.State.CONNECTING, "switching to ${location.name}")
+                synchronized(intent) {
+                    // A disconnect while the core switched wins: no reconnect after it.
+                    if (!intent.reconnect(since)) { connectLoop = false; return@Thread }
+                    set(Tunnel.State.CONNECTING, "switching to ${location.name}")
+                }
                 worker.execute { connectWhenReady() }
             }.start()
         }

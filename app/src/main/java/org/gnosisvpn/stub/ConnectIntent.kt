@@ -10,11 +10,14 @@ internal class ConnectIntent {
     @Volatile private var want = false
     private var pendingConnect = false
     private var disconnects = 0
+    /** Counts disconnects and clears of [wanted]: a step that took a while checks none came. */
+    @Volatile var epoch = 0L
+        private set
 
     /** Read by tun requests, the connect loop and the status loop; false also drops a pending connect. */
     var wanted: Boolean
         get() = want
-        set(v) = synchronized(this) { want = v; if (!v) pendingConnect = false }
+        set(v) = synchronized(this) { want = v; if (!v) { pendingConnect = false; epoch++ } }
 
     @Synchronized fun connect() {
         if (disconnects > 0) pendingConnect = true else want = true
@@ -22,7 +25,14 @@ internal class ConnectIntent {
 
     /** A disconnect task was queued. */
     @Synchronized fun disconnect() {
-        want = false; pendingConnect = false; disconnects++
+        want = false; pendingConnect = false; disconnects++; epoch++
+    }
+
+    /** connect(), unless a disconnect came after [since] (an [epoch]): then the user's last action was that. */
+    @Synchronized fun reconnect(since: Long): Boolean {
+        if (epoch != since) return false
+        connect()
+        return true
     }
 
     /** A disconnect task finished: true when the tunnel is now idle, false when a connect takes over. */

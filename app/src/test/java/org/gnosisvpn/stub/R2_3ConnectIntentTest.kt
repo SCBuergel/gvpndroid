@@ -34,6 +34,16 @@ class R2_3ConnectIntentTest {
         assertTrue(i.disconnectDone()); assertFalse(i.wanted)
     }
 
+    @Test fun aLocationSwitchDoesNotReconnectAfterADisconnectDuringIt() {
+        i.connect()
+        val since = i.epoch   // the switch starts; its core Disconnect takes a while
+        i.disconnect()        // the user taps Disconnect meanwhile
+        assertFalse(i.reconnect(since))
+        assertTrue(i.disconnectDone()); assertFalse(i.wanted)
+        val again = i.epoch   // a switch with nothing in between re-arms
+        assertTrue(i.reconnect(again)); assertTrue(i.wanted)
+    }
+
     @Test fun aPlainDisconnectEndsIdle() {
         i.connect(); i.disconnect()
         assertTrue(i.disconnectDone()); assertFalse(i.wanted)
