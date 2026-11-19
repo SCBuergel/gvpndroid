@@ -113,7 +113,8 @@ interface EngineHooks {
     fun openUrl(url: String) {}
     fun share(text: String) {}
     fun copy(label: String, text: String) {}
-    fun openSystemVpnSettings() {}
+    /** Opens Android's VPN settings; false if they could not be opened. */
+    fun openSystemVpnSettings(): Boolean = false
     fun exportLogs() {}
     fun requestTile() {}
     /** Restart the backend after a failure. */
@@ -460,11 +461,19 @@ open class Engine {
        system screen; what the user changed there is read when they come back (sysVpnReturned). */
     fun openSysVpn(purpose: String?) {
         sysPurpose = purpose; sysBefore = lockdown
-        if (simulatesSystem) go("sysvpn") else hooks.openSystemVpnSettings()
+        if (simulatesSystem) go("sysvpn")
+        else if (hooks.openSystemVpnSettings()) sysAway = true
+        else sysPurpose = null
     }
+
+    /** In Android's VPN settings; kept here, not in the activity, so a recreated screen still sees the return. */
+    private var sysAway = false
+
+    /** On resume: whether the user is back from the VPN settings [openSysVpn] opened (true once per trip). */
+    fun takeSysReturn() = sysAway.also { sysAway = false }
     /** Called when the user comes back from the (real or simulated) system screen. [now] is the Lockdown state read there. */
     fun sysVpnReturned(now: Boolean = lockdown) {
-        val purpose = sysPurpose; val was = sysBefore; lockdown = now; sysPurpose = null
+        val purpose = sysPurpose; val was = sysBefore; lockdown = now; sysPurpose = null; sysAway = false
         if (purpose == "pay") {
             if (!now) { ldOffPay = true; conn = Conn.IDLE; pause = null; stack = mutableListOf("add"); onPayLockdownOff(); return }
             toast("Lockdown is still on. Paying needs it off for a moment.")

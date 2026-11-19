@@ -76,10 +76,7 @@ class UiActivity : ComponentActivity() {
         App.instance.activity = this
         // Back from Android's VPN settings: read what the user changed there.
         val eng = App.instance.engine
-        if (returningFromSettings) {
-            returningFromSettings = false
-            App.instance.readLockdown()?.let { eng.sysVpnReturned(it); eng.emit() }
-        }
+        if (eng.takeSysReturn()) App.instance.readLockdown()?.let { eng.sysVpnReturned(it); eng.emit() }
     }
 
     override fun onDestroy() {
@@ -87,11 +84,9 @@ class UiActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private var returningFromSettings = false
-    fun openVpnSettings() {
-        returningFromSettings = true
-        runCatching { startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }.onFailure { toast("VPN settings are not available on this device.") }
-    }
+    /** Opens Android's VPN settings; false (with a toast) if there are none. */
+    fun openVpnSettings() =
+        runCatching { startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }.onFailure { toast("VPN settings are not available on this device.") }.isSuccess
 
     fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
@@ -131,7 +126,7 @@ class AppHooks(private val ctx: Context) : EngineHooks {
     override fun openUrl(url: String) { app.activity?.openUrl(url) }
     override fun share(text: String) { app.activity?.share(text) }
     override fun copy(label: String, text: String) { app.activity?.copy(label, text) }
-    override fun openSystemVpnSettings() { app.activity?.openVpnSettings() }
+    override fun openSystemVpnSettings() = app.activity?.openVpnSettings() ?: false
     override fun exportLogs() { app.activity?.startLogExport() }
     override fun requestTile() { app.activity?.requestTile() }
     override fun connectVpn() {
