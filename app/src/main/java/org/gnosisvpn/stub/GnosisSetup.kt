@@ -30,6 +30,7 @@ object GnosisSetup {
         File(nb, "gnosis.toml").writeText(config)
         val props = File(nb, "gnosis.properties")
         if (!props.exists()) copyAsset(context, "$ASSETS/gnosis.properties", props)
+        chooseWireGuard(nb, false)
     }
 
     /**
@@ -44,8 +45,20 @@ object GnosisSetup {
     }
 
     fun disable(context: Context) {
+        chooseWireGuard(context.noBackupFilesDir, true)
         File(context.noBackupFilesDir, "gnosis.properties").delete()
     }
+
+    /** Records (or clears) the user's choice of WireGuard, so a new process does not set up Gnosis again. */
+    fun chooseWireGuard(noBackup: File, chosen: Boolean) {
+        val f = File(noBackup, WIREGUARD_CHOSEN)
+        if (chosen) f.writeText("") else f.delete()
+    }
+
+    fun choseWireGuard(noBackup: File) = File(noBackup, WIREGUARD_CHOSEN).exists()
+
+    private const val WIREGUARD_CHOSEN = "backend-wireguard"
+
 
     /** The identity files of the configured network, if the core has created them. */
     private fun identityDir(context: Context): File? {

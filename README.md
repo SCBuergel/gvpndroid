@@ -82,7 +82,8 @@ screen is what the core reports, and what it does not report is not shown.
   pauses soon, exit went offline), the Quick Settings tile, and the debug-only adb hook. The
   ongoing VPN notification is `TunnelService`'s, with the app's text and actions.
 
-A fresh install sets up the Gnosis backend by itself (data files from the APK). Lockdown is
+A fresh install sets up the Gnosis backend by itself (data files from the APK); a WireGuard
+choice on the developer screen is kept across restarts. Lockdown is
 Android's Always-on VPN with "Block connections without VPN": the app cannot set it, so every
 Lockdown control opens `Settings.ACTION_VPN_SETTINGS` and reads the state on return.
 

@@ -159,7 +159,7 @@ class MainActivity : Activity() {
 
     /** Switches between the WireGuard and Gnosis backends in place (data files are copied off the main thread). */
     private fun switchBackend() {
-        if (tunnel.state != Tunnel.State.DISCONNECTED && tunnel.state != Tunnel.State.ERROR) {
+        if (!App.canSwapBackend(tunnel.state)) {
             LogBuffer.log("disconnect first")
             return
         }

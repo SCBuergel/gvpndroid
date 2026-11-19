@@ -44,12 +44,21 @@ class App : Application() {
         }
     }
 
-    /** Sets up the Gnosis backend if this install does not use it yet (off the main thread). */
+    /**
+     * Sets up the Gnosis backend on a fresh install (off the main thread), not when the user chose
+     * WireGuard on the developer screen. Swaps backends only while the tunnel is down; otherwise
+     * the next process starts on Gnosis.
+     */
     fun ensureGnosis() {
-        if (usesGnosis || !canUseGnosis()) return
+        if (usesGnosis || !canUseGnosis() || GnosisSetup.choseWireGuard(noBackupFilesDir)) return
         Thread {
             runCatching { switchBackend(true) }
-                .onSuccess { android.os.Handler(mainLooper).post { selectBackend(); LogBuffer.log("gnosis backend set up for the app") } }
+                .onSuccess {
+                    android.os.Handler(mainLooper).post {
+                        if (canSwapBackend(tunnel.state)) { selectBackend(); LogBuffer.log("gnosis backend set up for the app") }
+                        else LogBuffer.log("gnosis backend set up; used from the next start (tunnel is ${tunnel.state})")
+                    }
+                }
                 .onFailure { LogBuffer.log("gnosis setup failed: ${it.javaClass.simpleName}: ${it.message}") }
         }.start()
     }
@@ -196,5 +205,8 @@ class App : Application() {
     companion object {
         lateinit var instance: App
             private set
+
+        /** Backends are swapped only while the tunnel is down: the old one's VpnService is disabled. */
+        fun canSwapBackend(state: Tunnel.State) = state == Tunnel.State.DISCONNECTED || state == Tunnel.State.ERROR
     }
 }

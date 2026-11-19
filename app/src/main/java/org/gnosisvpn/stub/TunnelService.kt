@@ -28,15 +28,18 @@ class TunnelService : Service() {
         }
     }
 
+    /** The tunnel [listener] was added to: App.tunnel may be another one by onDestroy. */
+    private var listened: Tunnel? = null
+
     override fun onCreate() {
         super.onCreate()
         running = true
-        tunnel.addListener(listener)
+        listened = tunnel.also { it.addListener(listener) }
     }
 
     override fun onDestroy() {
         running = false
-        tunnel.removeListener(listener)
+        listened?.removeListener(listener); listened = null
         super.onDestroy()
     }
 
