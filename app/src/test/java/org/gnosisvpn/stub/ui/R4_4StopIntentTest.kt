@@ -23,8 +23,9 @@ class R4_4StopIntentTest {
         val (tn, e, h) = setup(T.State.CONNECTED)
         assertEquals(Conn.CONNECTED, e.conn)
         e.act("disconnect"); assertEquals(1, h.stops)
+        val recent = e.recent.toList()
         e.tick(3)   // the service has not called tunnel.disconnect() yet
-        assertEquals(Conn.IDLE, e.conn)
+        assertEquals(Conn.IDLE, e.conn); assertEquals(recent, e.recent)
         tn.state = T.State.DISCONNECTING; e.tick(3)
         assertEquals(Conn.IDLE, e.conn)
         tn.state = T.State.DISCONNECTED; tn.session = null; e.tick()
@@ -55,5 +56,22 @@ class R4_4StopIntentTest {
         e.act("disconnect")   // nothing to stop
         tn.state = T.State.CONNECTED; tn.session = session; e.tick()   // e.g. always-on starts it
         assertTrue(e.conn == Conn.CONNECTED)
+    }
+
+    @Test fun aConnectFromOutsideTheEngineAfterTheStopIsShown() {
+        val (tn, e, _) = setup(T.State.CONNECTED)
+        e.act("disconnect"); tn.state = T.State.DISCONNECTING; e.tick()
+        tn.state = T.State.CONNECTING; tn.session = null; e.tick()   // e.g. Always-on, without DISCONNECTED in between
+        assertEquals(Conn.CONNECTING, e.conn)
+        tn.state = T.State.CONNECTED; tn.session = session; e.tick()
+        assertEquals(Conn.CONNECTED, e.conn)
+    }
+
+    @Test fun aStopThatNeverArrivesIsGivenUp() {
+        val (_, e, _) = setup(T.State.CONNECTED)
+        e.act("disconnect"); e.tick(GnosisEngine.STOP_WAIT.toInt())
+        assertEquals(Conn.IDLE, e.conn)
+        e.tick(2)   // the service never took it: the tunnel is still up, so show it
+        assertEquals(Conn.CONNECTED, e.conn)
     }
 }

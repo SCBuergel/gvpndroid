@@ -36,8 +36,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     private var lastIds = ""
     private var wallet: Tunnel.Wallet? = null
     private var session: Tunnel.Session? = null
-    /** The user stopped a live tunnel: until it is down (or they connect again), its last state brings no connection back. */
+    /** The user stopped a live tunnel: until the tunnel takes the stop (or they connect again), its last state brings no connection back. */
     private var stopping = false
+    private var stopAt = 0.0
     private var lastBought: Long? = null
     private var lastPayFail = false
     override val awaitingPayment: Boolean
@@ -189,7 +190,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     /* ---- the session ---- */
     private fun syncSession(tn: Tunnel, dt: Double) {
         val st = tn.state
-        if (st == Tunnel.State.DISCONNECTED || st == Tunnel.State.ERROR) stopping = false
+        // The stop has arrived once the tunnel leaves CONNECTED/CONNECTING; one that never does is given up after STOP_WAIT s.
+        if ((st != Tunnel.State.CONNECTED && st != Tunnel.State.CONNECTING) || t - stopAt > STOP_WAIT) stopping = false
         val s = tn.session?.takeIf { !stopping && st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING }
         session = s
         // alloc/free describe the live session only: a new session buys its own chunk.
@@ -336,7 +338,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override fun onPayLockdownOff() = stopTunnel()
     private fun stopTunnel() {
         val st = tunnel().state
-        stopping = st == Tunnel.State.CONNECTED || st == Tunnel.State.CONNECTING || st == Tunnel.State.DISCONNECTING
+        stopping = st == Tunnel.State.CONNECTED || st == Tunnel.State.CONNECTING; stopAt = t
         hooks.disconnectVpn()
     }
 
@@ -395,6 +397,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     }
 
     companion object {
+        /** Seconds a stop may take to reach the tunnel (an IPC round trip to TunnelService) before the tunnel's state counts again. */
+        const val STOP_WAIT = 10.0
         /** "Edinburgh, UK" → GB, "FR" → FR; "" when the place has no two-letter country. */
         fun countryCode(place: String): String {
             val c = place.substringAfterLast(",").trim().uppercase()
