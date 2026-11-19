@@ -29,8 +29,9 @@ class R2_4StartRetryTest {
         val retry = StartRetry({ wanted }, firstMs = 60_000)
         var tries = 0
         var result: Boolean? = null
-        val t = Thread { result = retry.run({}) { tries++; throw NoNetwork("startCore: resolve x: no network") } }.apply { start() }
-        Thread.sleep(200)
+        val waiting = java.util.concurrent.CountDownLatch(1)
+        val t = Thread { result = retry.run({ waiting.countDown() }) { tries++; throw NoNetwork("startCore: resolve x: no network") } }.apply { start() }
+        assertTrue(waiting.await(5, java.util.concurrent.TimeUnit.SECONDS))
         wanted = false; retry.wake()   // like disconnect()
         t.join(2_000)
         assertFalse(t.isAlive)
