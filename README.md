@@ -161,7 +161,8 @@ three and rejects 32-bit x86.
 
 This qube has no KVM, so the Android emulator cannot run. Instead, redroid runs Android 14
 (x86_64) as a Docker container on the host kernel, using its binder and tun, and adb reaches
-it at `localhost:5555`.
+it at the container's own address (`adb -s "$(scripts/emulator.sh serial)"`). Do not also connect
+to `localhost:5555`: two transports to one adbd drop each other.
 
     scripts/emulator.sh start     # start or create the container, wait for boot, adb connect
     scripts/emulator.sh status    # state, memory use, adb
