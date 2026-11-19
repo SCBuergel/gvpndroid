@@ -126,7 +126,7 @@ When a stall or reconnect starts, the app logs the core's connection state and n
   every debug APK, including ones shared by link: whoever has the APK can see the messages' titles
   and timing and post forged messages. The contents stay sealed. Rotate the topic if that matters.
 - Read the logs: `scripts/relay-read.py [SINCE]`, or `-f` to follow. It needs `log-x25519.key`
-  from the same folder. Tests: `scripts/test_r6_1_relay_attachment.py`, `scripts/test_r6_2_relay_follow.py`.
+  from the same folder. Tests: `scripts/test_r6_1_relay_attachment.py`, `scripts/test_r6_2_relay_follow.py` (the unit tests run both).
 - Removing it: delete those files and the `DEBUG ONLY` blocks, then delete the calls the compiler
   reports.
 
@@ -255,7 +255,7 @@ In the app: "Use Gnosis VPN", then Connect. Disconnect before installing an upda
     ABIS=arm64-v8a scripts/do-build/run.sh       # phone only
     KEEP=1 scripts/do-build/run.sh               # keep the droplet: rebuild.sh, then down.sh
     scripts/do-build/app.sh                      # the APK: assemble, lint, unit tests on a droplet (~15 min, 1 h deadline)
-    scripts/do-build/test-await-id.sh            # offline check of the droplet-id wait (~35 s)
+    scripts/do-build/test-await-id.sh            # offline check of the droplet-id wait (~35 s; manual, not in the unit tests)
     scripts/do-build/test-await-job.sh           # offline check of the bounded remote-build wait (~1 s)
 
 Every build first runs the crate's contract tests (`cargo test -p gnosis_vpn-android`, host
