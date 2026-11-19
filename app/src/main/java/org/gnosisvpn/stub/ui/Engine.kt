@@ -361,8 +361,9 @@ open class Engine {
         if (page() == "pick") back()
         val needs = !(left(id) > 0) && !free
         if (needs && short()) { sheet = Sheet("nobal", id); emit(); return }
-        if (popover && needs && autoRenew && !arIntro) { sheet = Sheet("quota", id, intro = true); emit(); return }   // once per installation
-        if (popover && !(left(id) > 0) && !autoRenew) { sheet = Sheet("quota", id); emit(); return }                     // off: ask every time
+        // On the main screen, as doConnect goes there: a quota sheet waits while a page (Settings) is open.
+        if (popover && needs && autoRenew && !arIntro) { home(); sheet = Sheet("quota", id, intro = true); emit(); return }   // once per installation
+        if (popover && !(left(id) > 0) && !autoRenew) { home(); sheet = Sheet("quota", id); emit(); return }                     // off: ask every time
         doConnect(id)
     }
     fun connLbl() = if (!popover && !free && !(left(loc) > 0)) "Connect · ${chunkTxt()}" else "Connect"
