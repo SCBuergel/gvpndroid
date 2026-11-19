@@ -9,7 +9,7 @@
 The API token is read from $DO_TOKEN_FILE (default ~/do-api-token) and never printed.
 The SSH key goes in through cloud-init, because the token may not manage account SSH keys.
 """
-import json, os, sys, time, urllib.error, urllib.request
+import http.client, json, os, sys, time, urllib.error, urllib.request
 
 API = "https://api.digitalocean.com/v2"
 TOKEN = open(os.path.expanduser(os.environ.get("DO_TOKEN_FILE", "~/do-api-token"))).read().strip()
@@ -29,7 +29,8 @@ def call(method, path, body=None):
             return e.code, json.loads(t)
         except ValueError:
             return e.code, {"raw": t[:300]}
-    except (urllib.error.URLError, OSError) as e:   # timeout, reset, DNS: status 0, never a traceback
+    # Timeout, reset, DNS, a reply cut short or garbled: status 0, never a traceback.
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
         return 0, {"error": str(e)}
 
 

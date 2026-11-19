@@ -77,12 +77,13 @@ def call(method, path, body=None):
 
     @Test fun aNetworkErrorIsAStatusNotATraceback() {
         val py = """
-import sys, urllib.request
+import sys, http.client, urllib.request
 sys.path.insert(0, sys.argv[1])
 import droplet
-def boom(*a, **k): raise TimeoutError("timed out")
-urllib.request.urlopen = boom
-print(droplet.call("GET", "/droplets/1")[0])
+for e in [TimeoutError("timed out"), ConnectionResetError(), http.client.IncompleteRead(b"")]:
+    def boom(*a, **k): raise e
+    urllib.request.urlopen = boom
+    print(droplet.call("GET", "/droplets/1")[0])
 """
         File(tmp.root, "token").writeText("t")
         val p = ProcessBuilder("python3", "-I", "-c", py, File("../scripts/do-build").absolutePath).redirectErrorStream(true)
@@ -90,6 +91,6 @@ print(droplet.call("GET", "/droplets/1")[0])
         val proc = p.start()
         val out = proc.inputStream.bufferedReader().readText()
         assertEquals(out, 0, proc.waitFor())
-        assertEquals("0", out.trim())
+        assertEquals(listOf("0", "0", "0"), out.trim().lines())
     }
 }
