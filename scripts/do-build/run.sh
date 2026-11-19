@@ -66,7 +66,8 @@ step setup
 
 # Detached on the droplet so a dropped SSH connection does not kill the build.
 ssh_ "ABIS='$ABIS' PROFILE=$PROFILE nohup bash -c 'bash /root/upload/build-remote.sh; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
-until ssh_ 'grep -q "^JOB-EXIT" /root/build.log' 2>/dev/null; do sleep 15; done
+# Bounded: stop before the deadline deletes the droplet, or when it stops answering.
+await_job $(( t0 + DEADLINE_S - 300 ))
 ssh_ 'grep -E "^(error|STEP|JOB-EXIT|test )|could not compile|panicked" /root/build.log'
 ssh_ 'grep -q "^JOB-EXIT 0" /root/build.log' || { ssh_ 'tail -40 /root/build.log'; exit 1; }
 step build

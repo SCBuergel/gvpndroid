@@ -86,17 +86,7 @@ step setup
 # Detached on the droplet so a dropped SSH connection does not kill the build.
 ssh_ "cd /root/src && nohup bash -c 'ANDROID_HOME=/opt/sdk GVPNDROID_SECRETS=/root/relay ./gradlew --no-daemon $TASKS; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
 # Bounded: stop before the deadline deletes the droplet, or when it stops answering.
-limit=$(( t0 + DEADLINE_S - 300 )); fails=0
-while :; do
-    # ssh exits 255 only when the connection fails; the remote command always prints 1 or 0.
-    if r=$(ssh_ 'if grep -q "^JOB-EXIT" /root/build.log 2>/dev/null; then echo 1; else echo 0; fi' 2>/dev/null); then
-        fails=0; [ "$r" = 1 ] && break
-    else
-        fails=$((fails + 1)); [ "$fails" -ge 8 ] && { echo "droplet stopped answering (8 ssh failures in a row)" >&2; exit 1; }
-    fi
-    [ "$(date +%s)" -lt "$limit" ] || { echo "build still running 5 min before the deadline; giving up" >&2; exit 1; }
-    sleep 15
-done
+await_job $(( t0 + DEADLINE_S - 300 ))
 mkdir -p app/build/remote
 ssh_ 'cat /root/build.log' > app/build/remote/build.log
 grep -E 'BUILD|^e: |FAILED|JOB-EXIT|tests completed' app/build/remote/build.log | tail -8
