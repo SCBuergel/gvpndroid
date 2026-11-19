@@ -18,6 +18,7 @@ cd "$(dirname "$0")/.."
 A="adb -s ${ANDROID_SERIAL:-localhost:5555}"
 PKG=org.gnosisvpn.stub.debug
 NB=/data/user/0/$PKG/no_backup
+ACT=org.gnosisvpn.stub.ui.UiActivity   # the launcher activity (MainActivity is the unexported developer screen)
 
 push_private() { # $1 local file, $2 path relative to no_backup
     $A push "$1" /data/local/tmp/gvpn-xfer >/dev/null
@@ -38,7 +39,7 @@ setup)
     $A install -r "$apk" | tail -1
     $A shell appops set $PKG ACTIVATE_VPN allow
     $A shell pm grant $PKG android.permission.POST_NOTIFICATIONS 2>/dev/null || true
-    $A shell am start -W -n $PKG/org.gnosisvpn.stub.MainActivity >/dev/null   # creates the data dirs
+    $A shell am start -W -n $PKG/$ACT >/dev/null   # creates the data dirs
     props "$conf"
     push_private "$share/geoip.mmdb" gnosis-share/geoip.mmdb
     for f in "$share"/curvy-zk/*; do push_private "$f" "gnosis-share/curvy-zk/$(basename "$f")"; done
@@ -48,21 +49,21 @@ props) props "$2" ;;
 restart)
     $A shell am force-stop $PKG
     $A logcat -c
-    $A shell am start -W -n $PKG/org.gnosisvpn.stub.MainActivity >/dev/null
+    $A shell am start -W -n $PKG/$ACT >/dev/null
     ;;
 connect)
     # Bring the app to the front and wait until it is displayed: a tap that lands on the
     # launcher instead does nothing for the app (and types into the home screen's search box).
-    $A shell am start -n $PKG/org.gnosisvpn.stub.MainActivity >/dev/null 2>&1
-    n=90; until $A shell dumpsys activity activities 2>/dev/null | grep -q "topResumedActivity.*$PKG/org.gnosisvpn.stub.MainActivity"; do
+    $A shell am start -n $PKG/$ACT >/dev/null 2>&1
+    n=90; until $A shell dumpsys activity activities 2>/dev/null | grep -q "topResumedActivity.*$PKG/$ACT"; do
         n=$((n - 3)); [ "$n" -gt 0 ] || { echo "app not in front" >&2; exit 1; }; sleep 3
     done
     sleep 2
     # uiautomator often fails in redroid ("null root node"); then tap the Connect/Disconnect
-    # button's fixed position (top of the 720x1280 screen).
+    # button's fixed position (the wide button at the bottom of the 720x1280 home screen).
     xy=$($A shell 'uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && cat /sdcard/ui.xml' 2>/dev/null | python3 -I -c 'import re,sys
-m=re.search(r"resource-id=\"[^\"]*:id/connectButton\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", sys.stdin.read())
-print((int(m[1])+int(m[3]))//2, (int(m[2])+int(m[4]))//2) if m else print("360 208")')
+m=re.search(r"text=\"(?:Connect|Disconnect)[^\"]*\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", sys.stdin.read())
+print((int(m[1])+int(m[3]))//2, (int(m[2])+int(m[4]))//2) if m else print("360 1095")')
     $A shell rm -f /sdcard/ui.xml
     $A shell input tap $xy
     ;;

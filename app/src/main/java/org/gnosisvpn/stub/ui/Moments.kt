@@ -42,7 +42,7 @@ fun Engine.moment(): Msg? {
         if (!metered) "Opening a route through the mixnet." else if (a > 0) "Uses the ${a.roundToInt()} MB left here." else if (free) "Setting aside your free ${chunkTxt()} at ${e.city}." else "Setting aside ${chunkTxt()} at ${e.city}.")
     if (conn == Conn.CONNECTED && awaitingPayment) return Msg(if (paymentFailed) Tone.WARN else Tone.INFO, "hourglass_top", "Waiting for ${e.city} to see your payment.",
         (if (paymentFailed) "The last payment failed; Gnosis VPN retries it automatically."
-         else "On a new connection this takes up to about 3 minutes while Gnosis Chain confirms it.") +
+         else "${e.city} holds traffic until it sees the payment for the next data, up to about 3 minutes while Gnosis Chain confirms it.") +
             " Traffic resumes by itself." + (if (balanceLow()) " Your balance is low." else ""),
         if (balanceLow()) listOf("Add funds" to "addData") else null)
     flash?.let { f -> return Msg(f.tone, TONE_ICON[f.tone] ?: "info", f.lead, f.text, f.btns.ifEmpty { null }) }

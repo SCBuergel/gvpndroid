@@ -3,7 +3,7 @@
 Android app for Gnosis VPN, the working basis for a production UI. The UI talks to one
 interface, `Tunnel`, with two backends:
 
-- **Gnosis VPN** (`GnosisTunnel`): the Gnosis VPN client core (Rust, gnosis_vpn-client main 7d745df: 1.0.1, IPC v2) via JNI;
+- **Gnosis VPN** (`GnosisTunnel`): the Gnosis VPN client core (Rust, gnosis_vpn-client main 8a0e3be: 1.1.1, IPC v3) via JNI;
   WireGuard carried over a 1-hop HOPR session to an exit, with PIX payments. Tested on prod
   (piz-palu) in redroid and on a Pixel.
 - **Plain WireGuard** (`WireGuardTunnel`): the official prebuilt WireGuard library, for
@@ -38,10 +38,9 @@ App (`app/src/main/java/org/gnosisvpn/stub/`):
 Rust and build:
 
 - `rust/gnosis_vpn-android/`: the JNI bridge crate (plays the desktop root process for the
-  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client 7d745df (main after v1.0.0; `CLIENT_REV` in `scripts/do-build/run.sh`),
-  plus newer HOPR dependencies in its Cargo.toml/Cargo.lock: hopr-strategy 9.2.0 (curvy-sdk 0.2.2:
-  the Curvy shield fixes that end the PIX payment loop), hoprnet master ff0076ef, edgli main 6455a823,
-  the same as gvpndows.
+  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client 8a0e3be (v1.1.1; `CLIENT_REV` in `scripts/do-build/run.sh`),
+  which already pins hopr-strategy 9.2.0 and edgli main 7bafb47; its Cargo.lock also moves hoprnet
+  master from 2acc3a58 to ff0076ef (transport fix: a relayer is judged over the hop its replies use).
 - `scripts/do-build/`: builds on throwaway DigitalOcean droplets: the Rust core (`run.sh`) and the app (`app.sh`).
 - `scripts/gnosis-assets.sh`: copies the client package's data files into the APK's assets.
 - `scripts/build.sh`: memory-guarded build, lint, unit tests, then `scripts/check-apk.sh`
@@ -86,7 +85,7 @@ A fresh install sets up the Gnosis backend by itself (data files from the APK). 
 Android's Always-on VPN with "Block connections without VPN": the app cannot set it, so every
 Lockdown control opens `Settings.ACTION_VPN_SETTINGS` and reads the state on return.
 
-Tests: `GnosisLiveDataTest` checks the parsers against client 7d745df's IPC v2 types,
+Tests: `GnosisLiveDataTest` checks the parsers against client 8a0e3be's IPC v3 types,
 `GnosisEngineTest` drives the engine over a fake tunnel (gate, start-up, exits, sessions,
 renewals, balance levels, payments, pauses). `EngineTest` keeps the shared state machine on the
 prototype's rules with `DemoEngine`, the prototype's fake backend, which exists only in the
@@ -230,7 +229,7 @@ client core (`GnosisTunnel`, WireGuard carried over a HOPR session). The Gnosis 
 when `no_backup/gnosis.properties` exists in the app's private storage.
 
 - `rust/gnosis_vpn-android`: JNI bridge, built as `libgnosisvpn.so` inside a
-  gnosis_vpn-client checkout (7d745df) with `rust/patches/0001-android-target.patch` applied.
+  gnosis_vpn-client checkout (8a0e3be) with `rust/patches/0001-android-target.patch` applied.
   It plays the desktop root process: the tun comes from `GnosisVpnService`, the kill switch is
   Android's Always-on VPN, in-tunnel pings are skipped (the app is excluded from its own VPN).
 - Device settings (outside the repo): `gnosis.properties` (`blokli_url`, `network`,

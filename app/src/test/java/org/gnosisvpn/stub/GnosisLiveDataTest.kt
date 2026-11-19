@@ -99,7 +99,7 @@ class GnosisLiveDataTest {
     @Test fun walletFromABalanceReply() {
         val reply = """{"type":"balance","data":{"type":"available","node":"4000000000000000","safe":"120500000000000000000","channels_out":[],
             "info":{"node_address":"0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072","node_peer_id":"12D3","safe_address":"0x01"},
-            "capacity_allocations":null,"ideal_balance":null,"pix_float":null,
+            "capacity_allocations":null,"ideal_balance":null,"pix_pool":null,
             "funding_status":{"traffic":{"type":"low"},"gas":{"type":"good"},"wxhopr_deficit":"20000000000000000000","xdai_deficit":null,"refill_shortfall":null}}}"""
         val w = GnosisProtocol.wallet(reply)!!
         assertEquals(0, BigDecimal("120.5").compareTo(w.traffic)); assertEquals(0, BigDecimal("0.004").compareTo(w.gas))

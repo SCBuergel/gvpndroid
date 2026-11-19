@@ -1,5 +1,5 @@
 {
- "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0 (exit addresses are public).",
+ "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0, updated for v1.1.1 (pix_pool, pix_price_per_byte) (exit addresses are public).",
  "commands": {
   "status": "{\"type\":\"status\"}",
   "disconnect": "{\"type\":\"disconnect\"}",
@@ -144,6 +144,7 @@
    "disconnecting": [],
    "probe": null,
    "pix_chunk_bytes": 660160512,
+   "pix_price_per_byte": "9000000000",
    "probing": {
     "level": {
      "type": "high"
@@ -183,7 +184,7 @@
      "wxhopr": "225350000002225467152",
      "xdai": "5000000000000000",
      "channel_stakes": "180000000002225467152",
-     "pix_float": "35350000000000000000",
+     "pix_pool": "35350000000000000000",
      "fee_to_start": "10000000000000000000",
      "txs_to_start": 3,
      "xdai_fee_per_tx": "50000000000000",
@@ -198,6 +199,7 @@
    "disconnecting": [],
    "probe": null,
    "pix_chunk_bytes": 660160512,
+   "pix_price_per_byte": "9000000000",
    "probing": {
     "level": {
      "type": "high"
@@ -262,6 +264,7 @@
    "disconnecting": [],
    "probe": null,
    "pix_chunk_bytes": 660160512,
+   "pix_price_per_byte": "9000000000",
    "probing": {
     "level": {
      "type": "high"
