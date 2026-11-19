@@ -17,7 +17,7 @@ class R7_17SignalDuringCreateTest {
     private val log get() = File(tmp.root, "droplet.log").let { if (it.exists()) it.readText() else "" }
 
     /** Starts [script] in its own process group, sends [signal] to the group once create started; exit code. */
-    private fun interrupt(script: String, signal: String): Int {
+    private fun interrupt(script: String, signal: String, failDelete: Boolean = false): Pair<Int, String> {
         val root = tmp.newFolder("repo")
         File(root, "scripts/do-build").mkdirs()
         for (f in listOf(script, "lib.sh")) File("../scripts/do-build/$f").copyTo(File(root, "scripts/do-build/$f"))
@@ -31,6 +31,8 @@ if cmd == "create":
     time.sleep(2); print("123", flush=True); time.sleep(30)
 elif cmd == "find":
     print("456")
+elif cmd == "delete" and os.environ.get("FAIL_DELETE"):
+    sys.exit("delete failed")
 """)
         val bin = tmp.newFolder("bin")
         File(bin, "ssh-keygen").writeText("#!/bin/bash\nf=\"\${@: -1}\"; : > \"\$f\"; : > \"\$f.pub\"\n")
@@ -43,30 +45,44 @@ elif cmd == "find":
             put("HOME", File(tmp.root, "home").apply { mkdirs() }.path); put("PATH", "${bin.path}:${get("PATH")}")
             put("DEADLINE", File(tmp.root, "deadline.py").apply { writeText("") }.path)
             put("DROPLET_LOG", File(tmp.root, "droplet.log").path); put("PID_FILE", pidFile.path); remove("KEEP")
+            if (failDelete) put("FAIL_DELETE", "1")
         }
         val proc = p.start()
         val deadline = System.currentTimeMillis() + 10_000
         while (!log.contains("create") && System.currentTimeMillis() < deadline) Thread.sleep(50)
         Thread.sleep(300)
         ProcessBuilder("kill", "-$signal", "--", "-${pidFile.readText().trim()}").start().waitFor()
-        val out = Thread { proc.inputStream.readBytes() }.apply { start() }
+        var out = ""
+        val reader = Thread { out = proc.inputStream.bufferedReader().readText() }.apply { start() }
         assertTrue("script did not end", proc.waitFor(60, TimeUnit.SECONDS))
-        out.join()
-        return proc.exitValue()
+        reader.join()
+        return proc.exitValue() to out
     }
 
     @Test fun ctrlCDuringCreateDeletesTheIdItPrints() {
         for (script in listOf("run.sh", "app.sh")) {
             tmp.root.listFiles()!!.forEach { it.deleteRecursively() }
-            assertEquals(script, 130, interrupt(script, "INT"))
+            val (code, out) = interrupt(script, "INT")
+            assertEquals(out, 130, code)
             assertEquals(script, listOf("create", "delete 123"), log.trim().lines())
+            assertTrue(out, out.contains("waiting for it so its droplet can be deleted"))
+        }
+    }
+
+    @Test fun aFailedDeleteOfARecoveredIdDoesNotClaimADeadline() {
+        for (script in listOf("run.sh", "app.sh")) {
+            tmp.root.listFiles()!!.forEach { it.deleteRecursively() }
+            val (code, out) = interrupt(script, "INT", failDelete = true)
+            assertEquals(out, 130, code)
+            assertTrue(out, out.contains("droplet 123 NOT verified deleted and NO deadline is armed"))
+            assertTrue(out, !out.contains("deadline stays armed"))
         }
     }
 
     @Test fun aCreateKilledBeforeItsIdIsFoundByNameAndDeleted() {
         for (script in listOf("run.sh", "app.sh")) {
             tmp.root.listFiles()!!.forEach { it.deleteRecursively() }
-            assertEquals(script, 130, interrupt(script, "TERM"))
+            assertEquals(script, 130, interrupt(script, "TERM").first)
             val calls = log.trim().lines()
             assertEquals(script, "create", calls[0])
             assertTrue("$script: $calls", calls[1].startsWith("find gvpndroid-"))

@@ -18,12 +18,13 @@ await_id() {
     echo "$id"
 }
 
-# recover_id FILE PID NAME: for teardown when no id is known but the create (PID, writing FILE)
-# was started, e.g. a Ctrl-C during it: the create ignores INT, so wait for the id it prints and
+# recover_id FILE PID NAME: for teardown when no id is known but the create (PID, empty if not yet
+# known; writing FILE) was started, e.g. a Ctrl-C during it: the create ignores INT, so wait for the id it prints and
 # stop it; if it died without one (TERM to the group), look the droplet up by NAME. Prints the id,
 # or nothing (and says why on stderr).
 recover_id() {
     local id
+    echo "interrupted during the droplet create: waiting for it so its droplet can be deleted" >&2
     id=$(await_id "$1" "$2")
     kill "$2" 2>/dev/null || true   # done with it: it may still wait for the droplet to be active
     if [ -z "$id" ]; then
