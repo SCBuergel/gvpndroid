@@ -55,6 +55,7 @@ android {
             it.inputs.file("../scripts/gnosis-emulator.sh")
             it.inputs.file("../scripts/do-build/lib.sh")
             it.inputs.file("../scripts/do-build/rebuild.sh")
+            it.inputs.file("../scripts/do-build/build-remote.sh")
         }
     }
 
