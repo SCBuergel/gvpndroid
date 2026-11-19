@@ -149,7 +149,19 @@ class App : Application() {
         })
     }
 
-    private val stateLogger = Tunnel.Listener { s, detail -> LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: "")) }
+    private val stateLogger = Tunnel.Listener { s, detail ->
+        LogBuffer.log("state -> $s" + (detail?.let { " ($it)" } ?: ""))
+        // tunnel.state, not s: the event is posted and the tunnel may have moved on.
+        if (backendSwap.onState(tunnel.state)) LogBuffer.log("backend: ${if (usesGnosis) "gnosis" else "wireguard"} (switched once the tunnel was down)")
+    }
+
+    private val backendSwap = DeferredSwap { selectBackend() }
+
+    /**
+     * [selectBackend] after the developer screen switched the backend's files: now if the tunnel is
+     * down (returns true), otherwise as soon as it is, never under a connected tunnel.
+     */
+    fun selectBackendWhenDown(): Boolean = backendSwap.request(tunnel.state)
 
     /** Whether this APK can run the Gnosis backend: bundled data files and the Rust core library. */
     fun canUseGnosis() = GnosisSetup.bundled(this) && GnosisNative.loadError == null

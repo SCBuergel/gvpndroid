@@ -25,7 +25,11 @@ class MainActivity : Activity() {
     private lateinit var logScroll: ScrollView
     private val ticker = Handler(Looper.getMainLooper())
 
-    private val stateListener = Tunnel.Listener { state, _ -> render(state) }
+    /** The backend this screen was built for; a switch deferred until the tunnel was down rebuilds it. */
+    private val shownGnosis = App.instance.usesGnosis
+    private val stateListener = Tunnel.Listener { state, _ -> if (app.usesGnosis != shownGnosis) recreate() else render(state) }
+    /** The tunnel [stateListener] is on (App.tunnel changes with the backend). */
+    private var listened: Tunnel? = null
     private val logListener: (String) -> Unit = { appendLog(it) }
     private val tick = object : Runnable {
         override fun run() { renderStats(); renderFunding(); renderLocation(); ticker.postDelayed(this, 1000) }
@@ -87,7 +91,7 @@ class MainActivity : Activity() {
 
         showRecentLog()
         LogBuffer.addListener(logListener)
-        tunnel.addListener(stateListener)
+        listened = tunnel.also { it.addListener(stateListener) }
         render(tunnel.state)
 
         val debuggable = (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -113,7 +117,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         LogBuffer.removeListener(logListener)
-        tunnel.removeListener(stateListener)
+        listened?.removeListener(stateListener)
         super.onDestroy()
     }
 
@@ -169,9 +173,13 @@ class MainActivity : Activity() {
             try {
                 app.switchBackend(toGnosis)
                 runOnUiThread {
-                    app.selectBackend()
-                    LogBuffer.log("backend: ${if (app.usesGnosis) "gnosis" else "wireguard"}")
-                    recreate()
+                    // The tunnel may have been connected during the copy: swap only once it is down.
+                    if (app.selectBackendWhenDown()) {
+                        LogBuffer.log("backend: ${if (app.usesGnosis) "gnosis" else "wireguard"}")
+                        recreate()
+                    } else {
+                        LogBuffer.log("backend switch takes effect after disconnecting (tunnel is ${tunnel.state})")
+                    }
                 }
             } catch (e: Throwable) {
                 // Throwable: a missing native library surfaces as UnsatisfiedLinkError, an Error.
