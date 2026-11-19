@@ -41,6 +41,7 @@ Rust and build:
   core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client 8a0e3be (v1.1.1; `CLIENT_REV` in `scripts/do-build/run.sh`),
   which already pins hopr-strategy 9.2.0 and edgli main 7bafb47; its Cargo.lock also moves hoprnet
   master from 2acc3a58 to ff0076ef (transport fix: a relayer is judged over the hop its replies use).
+  `Core::start` also shuts the node down on every return: in the app no process exit does it.
 - `scripts/do-build/`: builds on throwaway DigitalOcean droplets: the Rust core (`run.sh`) and the app (`app.sh`).
 - `scripts/gnosis-assets.sh`: copies the client package's data files into the APK's assets.
 - `scripts/build.sh`: memory-guarded build, lint, unit tests, then `scripts/check-apk.sh`

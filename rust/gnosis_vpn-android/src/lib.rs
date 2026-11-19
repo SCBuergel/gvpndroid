@@ -5,7 +5,7 @@
 //! device, routes, kill switch and an in-tunnel ping. Here this bridge plays root:
 //! - the kill switch is a no-op (Android's "Always-on VPN + block connections without VPN");
 //! - `SetupTunnel` becomes an event for Kotlin, which builds the tun with `VpnService.Builder`
-//!   and hands the fd back through [`tunReady`], over the same fd-passing socket the desktop
+//!   and hands the fd back through `tunReadyFor`, over the same fd-passing socket the desktop
 //!   worker uses;
 //! - the in-tunnel ping is answered as skipped: the app is excluded from its own VPN (so the
 //!   HOPR traffic does not loop), and a ping from it would bypass the tunnel.
@@ -39,8 +39,8 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// One runtime for the process; the core runs on it.
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-/// Sender into the running core; None until `Core::init` succeeded.
-static TO_CORE: Mutex<Option<mpsc::Sender<WorkerToCore>>> = Mutex::new(None);
+/// Generation of and sender into the running core; None until `Core::init` succeeded.
+static TO_CORE: Mutex<Option<(u64, mpsc::Sender<WorkerToCore>)>> = Mutex::new(None);
 /// Our end of the TUN fd-passing socket; the core's end is registered with `set_tun_fd_socket`.
 static TUN_SOCKET: OnceLock<UnixStream> = OnceLock::new();
 /// Set while a core is starting or running; guards against a second core in the process.
@@ -65,7 +65,13 @@ fn push_event(event: serde_json::Value) {
 }
 
 fn to_core() -> Option<mpsc::Sender<WorkerToCore>> {
-    TO_CORE.lock().unwrap().clone()
+    TO_CORE.lock().unwrap().as_ref().map(|(_, sender)| sender.clone())
+}
+
+/// The sender of the core of `generation`, if that core is still the running one: an earlier
+/// core's request must never be answered into a later core (request ids restart per core).
+fn to_core_of(generation: u64) -> Option<mpsc::Sender<WorkerToCore>> {
+    TO_CORE.lock().unwrap().as_ref().filter(|(g, _)| *g == generation).map(|(_, sender)| sender.clone())
 }
 
 /// `GnosisNative.initAndroid(context: Context)` — once per process, before `startCore`: gives the
@@ -179,17 +185,26 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_pollEvent(env: *mut 
     }
 }
 
-/// `GnosisNative.tunReady(requestId: Long, fd: Int): String?` — answers a `setup_tunnel` event
-/// with the established VpnService tun fd. The fd is duplicated into the core; the caller keeps
-/// (and later closes) its own copy. fd < 0 reports failure. Null on success, else the error.
+/// `GnosisNative.tunReadyFor(generation: Long, requestId: Long, fd: Int): String?` — answers a
+/// `setup_tunnel` event (its generation and request id) with the established VpnService tun fd.
+/// The fd is duplicated into the core; the caller keeps (and later closes) its own copy. fd < 0
+/// reports failure. Null on success, else the error. A request of a core that is no longer the
+/// running one gets no fd and no answer.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReady(
+pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReadyFor(
     env: *mut JNIEnv,
     _class: jclass,
+    generation: jlong,
     request_id: jlong,
     fd: jint,
 ) -> jstring {
-    let request_id = request_id as u64;
+    let (generation, request_id) = (generation as u64, request_id as u64);
+    // Held until the fd is in the socket: a fd sent for an earlier core would be read by the
+    // next core's recv_tun_fd (the socket is shared), so the target core must not change meanwhile.
+    let target = TO_CORE.lock().unwrap();
+    let Some(sender) = target.as_ref().filter(|(g, _)| *g == generation).map(|(_, sender)| sender.clone()) else {
+        return new_string(env, &format!("core {generation} is no longer running"));
+    };
     let result = (|| {
         if fd < 0 {
             return Err("the app could not establish the VPN tun".to_string());
@@ -201,8 +216,9 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReady(
         socket::fd_passing::send_fd(sock, &borrowed).map_err(|e| format!("send tun fd: {e}"))?;
         Ok("tun0".to_string())
     })();
+    drop(target);
     let error = result.as_ref().err().cloned();
-    respond(ResponseFromRoot::TunnelReady { request_id, res: result });
+    deliver(sender, ResponseFromRoot::TunnelReady { request_id, res: result });
     match error {
         None => ptr::null_mut(),
         Some(e) => new_string(env, &e),
@@ -222,31 +238,35 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_stopCore(_env: *mut 
     // Flag first: if init is still running, the init task sees it once init returns. If init
     // already handed over its sender, Shutdown reaches the running core.
     STOP_REQUESTED.store(true, Ordering::SeqCst);
-    if let Some(sender) = TO_CORE.lock().unwrap().take() {
+    if let Some((_, sender)) = TO_CORE.lock().unwrap().take() {
         let _ = sender.try_send(WorkerToCore::Shutdown);
     }
 }
 
-fn respond(response: ResponseFromRoot) {
-    match to_core() {
-        Some(sender) => {
-            runtime().spawn(async move {
-                let _ = sender.send(WorkerToCore::ResponseFromRoot(response)).await;
-            });
-        }
-        None => tracing::warn!(?response, "no core to deliver the response to"),
+/// Answers a request of the core of `generation`; dropped if that core is no longer running.
+fn respond(generation: u64, response: ResponseFromRoot) {
+    match to_core_of(generation) {
+        Some(sender) => deliver(sender, response),
+        None => tracing::warn!(generation, ?response, "core is no longer running; response dropped"),
     }
 }
 
-/// Plays the desktop root process for the core's requests.
-fn handle_request(request: RequestToRoot) {
+fn deliver(sender: mpsc::Sender<WorkerToCore>, response: ResponseFromRoot) {
+    runtime().spawn(async move {
+        let _ = sender.send(WorkerToCore::ResponseFromRoot(response)).await;
+    });
+}
+
+/// Plays the desktop root process for the requests of the core of `generation`.
+fn handle_request(generation: u64, request: RequestToRoot) {
     match request {
         RequestToRoot::KillswitchLockdown { request_id, .. } => {
             tracing::info!("kill switch: no-op on Android (use Always-on VPN)");
-            respond(ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
+            respond(generation, ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
         }
         RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, .. } => push_event(json!({
             "type": "setup_tunnel",
+            "generation": generation,
             "request_id": request_id,
             "address": interface_address,
             "mtu": mtu,
@@ -258,7 +278,7 @@ fn handle_request(request: RequestToRoot) {
             static ONCE: std::sync::Once = std::sync::Once::new();
             ONCE.call_once(|| tracing::warn!("in-tunnel pings are skipped: the app is excluded from its own VPN"));
             tracing::debug!("in-tunnel ping skipped");
-            respond(ResponseFromRoot::Ping { request_id, res: Ok(Duration::ZERO) });
+            respond(generation, ResponseFromRoot::Ping { request_id, res: Ok(Duration::ZERO) });
         }
         RequestToRoot::UpdatePeerIps { peer_ips } => tracing::debug!(n = peer_ips.len(), "peer ips (not needed on Android)"),
         RequestToRoot::ProbeStopped => tracing::debug!("probe stopped"),
@@ -339,21 +359,24 @@ fn prepare_and_spawn(
         tracing::info!(%blokli_ip, "core init");
         match Core::init(config, params, None, sender).await {
             Ok((core, to_core)) => {
-                *TO_CORE.lock().unwrap() = Some(to_core);
+                *TO_CORE.lock().unwrap() = Some((generation, to_core));
                 // Stopped while init ran (stopCore found no sender yet): queue Shutdown so the
                 // core runs its own teardown (tasks started during init) instead of serving.
                 if STOP_REQUESTED.load(Ordering::SeqCst) {
-                    if let Some(sender) = TO_CORE.lock().unwrap().take() {
+                    if let Some((_, sender)) = TO_CORE.lock().unwrap().take() {
                         let _ = sender.try_send(WorkerToCore::Shutdown);
                     }
                     tracing::info!("core stopped while starting; shutting it down");
                 }
                 tokio::spawn(async move {
                     while let Some(CoreToWorker::RequestToRoot(request)) = from_core.recv().await {
-                        handle_request(request);
+                        handle_request(generation, request);
                     }
                 });
                 push_event(json!({ "type": "core_started", "generation": generation }));
+                // Every return runs the core's teardown (HOPR node, PIX reactor, runners), also
+                // after a final connection error (rust/patches: Core::start), so no second node
+                // with this identity can start while this one is alive.
                 core.start().await;
                 TO_CORE.lock().unwrap().take();
                 // Event before releasing STARTED, and tagged: a new core can only start after it.
@@ -552,6 +575,16 @@ mod tests {
         let w = serde_json::to_value(serde_json::from_value::<Response>(f["status_warmup_issue"].clone()).unwrap()).unwrap();
         assert_eq!(w["data"]["run_mode"]["issue"]["kind"]["type"], "unreachable");
         assert!(w["data"]["run_mode"]["issue"]["message"].is_string());
+    }
+
+    /// A request of an earlier core is never answered into a later one (request ids restart).
+    #[test]
+    fn responses_reach_only_the_core_that_asked() {
+        let (sender, _rx) = tokio::sync::mpsc::channel::<gnosis_vpn_lib::event::WorkerToCore>(1);
+        *super::TO_CORE.lock().unwrap() = Some((5, sender));
+        assert!(super::to_core_of(4).is_none());
+        assert!(super::to_core_of(5).is_some());
+        super::TO_CORE.lock().unwrap().take();
     }
 
     /// A rejected command must not echo its text (funding commands carry a secret).

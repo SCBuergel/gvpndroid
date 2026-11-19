@@ -37,8 +37,11 @@ object GnosisNative {
     /** The next core event as JSON (setup_tunnel, teardown, core_started, core_error, ...), or null. */
     @JvmStatic external fun pollEvent(): String?
 
-    /** Answers a setup_tunnel event with the tun fd (or -1 on failure); null on success, else the error. */
-    @JvmStatic external fun tunReady(requestId: Long, fd: Int): String?
+    /**
+     * Answers a setup_tunnel event (its generation and request id) with the tun fd (or -1 on
+     * failure); null on success, else the error. A request of an earlier core gets nothing.
+     */
+    @JvmStatic external fun tunReadyFor(generation: Long, requestId: Long, fd: Int): String?
 
     @JvmStatic external fun stopCore()
 

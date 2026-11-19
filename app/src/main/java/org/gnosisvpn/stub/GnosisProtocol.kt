@@ -17,6 +17,12 @@ object GnosisProtocol {
 
     fun connect(destinationId: String): String = JSONObject().put("type", "connect").put("destination", destinationId).toString()
 
+    /**
+     * Whether a core event (setup_tunnel, core_stopped, core_error) comes from the core of
+     * [generation]: a late event of an earlier core must not steer the current one.
+     */
+    fun ofCore(event: JSONObject, generation: Long): Boolean = event.optLong("generation", -2) == generation
+
     /** Connect reply types meaning "accepted, the tunnel will follow". */
     val CONNECT_ACCEPTED = setOf("connecting", "already_connected", "waiting_to_connect")
 

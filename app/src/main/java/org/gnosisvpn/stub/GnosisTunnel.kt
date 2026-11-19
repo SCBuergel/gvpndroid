@@ -343,11 +343,11 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 }
                 // A late event of an earlier core (after a quick stop and restart) must not
                 // mark the current one as stopped.
-                "core_error" -> if (event.optLong("generation", -2) == coreGeneration) {
+                "core_error" -> if (GnosisProtocol.ofCore(event, coreGeneration)) {
                     coreRunning = false
                     set(Tunnel.State.ERROR, event.optString("error"))
                 }
-                "core_stopped" -> if (event.optLong("generation", -2) == coreGeneration) coreRunning = false
+                "core_stopped" -> if (GnosisProtocol.ofCore(event, coreGeneration)) coreRunning = false
             }
         }
     }
@@ -358,6 +358,11 @@ class GnosisTunnel(private val context: Context) : Tunnel {
      * only then close the old one, so there is no moment without a VPN.
      */
     private fun setupTunnel(event: org.json.JSONObject) {
+        val generation = event.optLong("generation", -2)
+        if (!GnosisProtocol.ofCore(event, coreGeneration)) {
+            LogBuffer.log("gnosis: ignoring a tun request of an earlier core ($generation)")
+            return
+        }
         val id = event.getLong("request_id")
         val address = event.getString("address")
         val mtu = event.getInt("mtu")
@@ -366,7 +371,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         try {
             val current = tun
             if (current != null && params == tunParams) {
-                GnosisNative.tunReady(id, current.fd)?.let { error(it) }
+                GnosisNative.tunReadyFor(generation, id, current.fd)?.let { error(it) }
                 set(Tunnel.State.CONNECTED, "reconnected in place, tun kept")
                 return
             }
@@ -376,11 +381,11 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             tun = pfd
             tunParams = params
             current?.let { runCatching { it.close() } }
-            GnosisNative.tunReady(id, pfd.fd)?.let { error(it) }
+            GnosisNative.tunReadyFor(generation, id, pfd.fd)?.let { error(it) }
             set(Tunnel.State.CONNECTED, "tun $address mtu $mtu")
         } catch (e: Exception) {
             LogBuffer.log("gnosis: tun setup failed: ${e.javaClass.simpleName}: ${e.message}")
-            GnosisNative.tunReady(id, -1)
+            GnosisNative.tunReadyFor(generation, id, -1)
             set(Tunnel.State.ERROR, "tun setup failed")
         }
     }

@@ -199,6 +199,22 @@ index a8f5221e..7b0b1085 100644
  pub use noop::{ActivityToken, disable};
  
  #[cfg(test)]
+diff --git a/gnosis_vpn-lib/src/core/mod.rs b/gnosis_vpn-lib/src/core/mod.rs
+index d8cf683d..31de1c32 100644
+--- a/gnosis_vpn-lib/src/core/mod.rs
++++ b/gnosis_vpn-lib/src/core/mod.rs
+@@ -360,6 +360,11 @@ impl Core {
+                 _ = probing_tick.tick() => self.sync_network_probing(),
+             }
+         }
++        // The desktop worker relies on its process exiting after some breaks (final connection
++        // error, closed receiver); in-process (Android) the node would keep running, so tear down.
++        if !matches!(self.phase, Phase::ShuttingDown) {
++            self.shut_down().await;
++        }
+     }
+ 
+     async fn shut_down(&mut self) {
 diff --git a/gnosis_vpn-lib/src/dirs.rs b/gnosis_vpn-lib/src/dirs.rs
 index d13c9dfb..4f550d7e 100644
 --- a/gnosis_vpn-lib/src/dirs.rs
