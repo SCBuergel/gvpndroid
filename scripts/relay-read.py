@@ -8,10 +8,24 @@ with the developer's key. Reads ~/.config/gvpndroid-secrets/{ntfy-topic,log-x255
 Usage: scripts/relay-read.py [SINCE]   SINCE: ntfy's since= (default 1h; e.g. 30m, 12h, all)
        scripts/relay-read.py -f        follow: print new parts as they arrive
 """
-import base64, gzip, hashlib, json, os, sys, time, urllib.request
+import base64, hashlib, json, os, re, sys, time, urllib.request, zlib
 
 S = os.environ.get("GVPNDROID_SECRETS", os.path.expanduser("~/.config/gvpndroid-secrets"))
 TAG = b"gvpndroid-log-v1"
+MAX_LOG = 20_000_000   # a log part never unpacks to more; anyone can post to the topic
+
+
+def gunzip(z):
+    d = zlib.decompressobj(wbits=31)
+    out = d.decompress(z, MAX_LOG)
+    if d.unconsumed_tail:
+        raise ValueError(f"unpacks to more than {MAX_LOG} bytes")
+    return out
+
+
+def safe(s):
+    """Text from whoever posted to the topic, without terminal control sequences."""
+    return re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "?", s)
 
 
 def unseal(body, priv):
@@ -21,7 +35,7 @@ def unseal(body, priv):
     e, ct = blob[:32], blob[32:]
     shared = priv.exchange(X25519PublicKey.from_public_bytes(e))
     key = hashlib.sha256(TAG + shared + e + priv.public_key().public_bytes_raw()).digest()
-    return gzip.decompress(ChaCha20Poly1305(key).decrypt(b"\0" * 12, ct, e)).decode("utf-8", "replace")
+    return gunzip(ChaCha20Poly1305(key).decrypt(b"\0" * 12, ct, e)).decode("utf-8", "replace")
 
 
 def show(m, priv):
@@ -46,7 +60,7 @@ def show(m, priv):
         text = note or (unseal(body, priv) if body.startswith(TAG.decode() + " ") else "(not a sealed log part)")
     except Exception as ex:  # a part that is not ours or is damaged: say so, keep going
         text = f"(cannot open: {type(ex).__name__})"
-    print(f"=== {t} {m.get('title', '')}\n{text}", flush=True)
+    print(f"=== {t} {safe(m.get('title', ''))}\n{safe(text)}", flush=True)
 
 
 def main():

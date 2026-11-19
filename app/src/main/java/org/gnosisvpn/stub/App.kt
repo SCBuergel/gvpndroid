@@ -87,7 +87,8 @@ class App : Application() {
 
         LogBuffer.log("process started, backend: ${if (usesGnosis) "gnosis" else "wireguard"}")
         GnosisNative.loadError?.let { LogBuffer.log("gnosis core not available: $it") }
-            ?: LogBuffer.log("gnosis core: ${GnosisNative.version()}, config check: ${GnosisNative.checkConfig("") ?: "ok"}")
+            ?: LogBuffer.log("gnosis core: ${GnosisNative.version()}, config check: " +
+                (java.io.File(noBackupFilesDir, "gnosis.toml").takeIf { it.isFile }?.let { GnosisNative.checkConfig(it.readText()) ?: "ok" } ?: "no config yet"))
         reportPreviousCrash()
         try {
             watchNetwork()

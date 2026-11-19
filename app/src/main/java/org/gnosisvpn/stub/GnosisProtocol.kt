@@ -120,10 +120,14 @@ object GnosisProtocol {
         wantConnected && !connectLoop && now == "disconnected" && before in setOf("connecting", "reconnecting") && coreTarget.isNullOrEmpty()
 
     /** Why the core refused a connect, in words, or null when it took it (connecting, waiting, already connected). */
+    /** The JNI bridge's reply to a command before the core runs (lib.rs). */
+    const val CORE_NOT_RUNNING = "core is not running"
+
     fun connectRefusal(reply: String?): String? {
         if (reply.isNullOrEmpty()) return "The Gnosis VPN core did not answer."
         val o = runCatching { JSONObject(reply) }.getOrNull() ?: return null
-        str(o, "error")?.let { return it }
+        // The bridge says this while a (re)started core is not up yet: wait, do not give up.
+        str(o, "error")?.let { return it.takeIf { e -> e != CORE_NOT_RUNNING } }
         val d = statusData(reply) ?: o
         return if (d.optString("type") == "unable_to_connect") whyNot(d.optJSONObject("route_health")) else null
     }

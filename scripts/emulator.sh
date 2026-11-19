@@ -1,11 +1,12 @@
 #!/bin/sh
 # Local Android test device: redroid (Android in a Docker container), driven over adb.
 # No KVM is needed; it uses the host kernel's binder and tun.
-# Usage: scripts/emulator.sh start|stop|status|adb
+# Usage: scripts/emulator.sh start|stop|status|adb|serial
 #   start   start (or create) the container, wait for boot, prepare /dev/tun, adb connect
 #   stop    stop the container (keeps image and data)
 #   status  container state, boot state, memory use, adb devices
 #   adb     (re)connect adb only
+#   serial  print the adb serial (the container's address:5555)
 # Environment: REDROID_IMAGE, REDROID_NAME, REDROID_DATA, REDROID_PORT, REDROID_MEM,
 #              MIN_AVAIL_MB (memory needed to start, override with FORCE=1).
 set -eu
@@ -18,7 +19,11 @@ DATA=${REDROID_DATA:-$HOME/android/redroid-data}
 PORT=${REDROID_PORT:-5555}
 MEM=${REDROID_MEM:-2g}
 MIN_AVAIL_MB=${MIN_AVAIL_MB:-1500}
-SERIAL="localhost:$PORT"
+# adb goes to the container's own address, not the published localhost port: the adb server
+# also finds a local port 5555 by itself (as emulator-5554), and two transports to one adbd
+# drop each other ("error: closed", "waiting for device"). `emulator.sh serial` prints it.
+serial() { ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$NAME" 2>/dev/null || true); echo "${ip:-localhost}:5555"; }
+SERIAL=$(serial)
 
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" = true ]; }
 booted() { [ "$(docker exec "$NAME" getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; }
@@ -28,7 +33,7 @@ load_modules() {
     # them it cannot mark incoming packets, so with a VPN up the replies of adbd go into the
     # tunnel and adb drops. Modules are not persistent on Qubes: load them on every start.
     # The legacy tables are empty with ACCEPT policies and do not affect the host's nftables.
-    mods="iptable_filter iptable_mangle iptable_raw iptable_nat ip6table_filter ip6table_mangle
+    mods="tun iptable_filter iptable_mangle iptable_raw iptable_nat ip6table_filter ip6table_mangle
           ip6table_raw ip6table_nat xt_mark xt_connmark xt_TCPMSS xt_tcpmss xt_owner xt_comment
           xt_state xt_bpf xt_IDLETIMER xt_NFLOG xt_quota xt_socket xt_pkttype xt_policy
           xt_length xt_limit xt_u32 xt_CT xt_REDIRECT xt_multiport xt_iprange ipt_REJECT ip6t_REJECT"
@@ -50,6 +55,7 @@ prepare_tun() {
 }
 
 adb_connect() {
+    SERIAL=$(serial)   # known only once the container runs
     for _ in $(seq 1 15); do
         adb connect "$SERIAL" >/dev/null 2>&1 || true
         [ "$(adb -s "$SERIAL" get-state 2>/dev/null)" = device ] && { echo "adb: $SERIAL connected"; return 0; }
@@ -120,5 +126,6 @@ case "${1:-}" in
     stop) stop ;;
     status) status ;;
     adb) running || { echo "$NAME not running" >&2; exit 1; }; adb_connect ;;
-    *) echo "usage: $0 start|stop|status|adb" >&2; exit 64 ;;
+    serial) serial ;;
+    *) echo "usage: $0 start|stop|status|adb|serial" >&2; exit 64 ;;
 esac

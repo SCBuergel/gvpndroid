@@ -12,7 +12,7 @@ import java.math.BigDecimal
 
 /**
  * What the UI shows comes from these parsers: exit health, the session with its data chunks, the
- * wallet and start-up steps. Samples follow client 7d745df's IPC v2 types
+ * wallet and start-up steps. Samples follow client 8a0e3be's IPC v3 types
  * (gnosis_vpn-ipc protocol.rs); the running status is a real reply from tests/protocol.json.
  */
 class GnosisLiveDataTest {
@@ -141,6 +141,8 @@ class GnosisLiveDataTest {
         assertEquals("There is no route to this exit right now.",
             GnosisProtocol.connectRefusal("""{"type":"connect","data":{"type":"unable_to_connect","destination":{},"route_health":{"type":"not_routable"}}}"""))
         assertEquals("worker offline", GnosisProtocol.connectRefusal("""{"error":"worker offline"}"""))
+        // a core that is (re)starting is waited for, not taken as a refusal
+        assertNull(GnosisProtocol.connectRefusal("""{"error":"core is not running"}"""))
         assertEquals("The Gnosis VPN core did not answer.", GnosisProtocol.connectRefusal(null))
     }
 

@@ -198,6 +198,9 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         val blokli = props.getProperty("blokli_url") ?: error("gnosis.properties has no blokli_url")
         val network = props.getProperty("network") ?: error("gnosis.properties has no network")
         // A core stopped moments ago may still be shutting down: retry for a while.
+        // The last status is the stopped core's (the core restarts itself after a final
+        // connection error): forget it, so Connect waits for the new core's own "running".
+        status = null
         var waited = 0
         while (true) {
             // Set before starting, so even an immediate core_error of the new core is matched.

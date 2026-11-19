@@ -15,7 +15,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 . "$HOME/android/env.sh"
-A="adb -s ${ANDROID_SERIAL:-localhost:5555}"
+A="adb -s ${ANDROID_SERIAL:-$(scripts/emulator.sh serial)}"
 PKG=org.gnosisvpn.stub.debug
 NB=/data/user/0/$PKG/no_backup
 ACT=org.gnosisvpn.stub.ui.UiActivity   # the launcher activity (MainActivity is the unexported developer screen)
@@ -54,6 +54,8 @@ restart)
 connect)
     # Bring the app to the front and wait until it is displayed: a tap that lands on the
     # launcher instead does nothing for the app (and types into the home screen's search box).
+    # A sleeping display ignores taps: wake it and keep it on while plugged in (redroid is).
+    $A shell input keyevent KEYCODE_WAKEUP; $A shell svc power stayon true
     $A shell am start -n $PKG/$ACT >/dev/null 2>&1
     n=90; until $A shell dumpsys activity activities 2>/dev/null | grep -q "topResumedActivity.*$PKG/$ACT"; do
         n=$((n - 3)); [ "$n" -gt 0 ] || { echo "app not in front" >&2; exit 1; }; sleep 3
@@ -61,10 +63,10 @@ connect)
     sleep 2
     # uiautomator often fails in redroid ("null root node"); then tap the Connect/Disconnect
     # button's fixed position (the wide button at the bottom of the 720x1280 home screen).
-    xy=$($A shell 'uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && cat /sdcard/ui.xml' 2>/dev/null | python3 -I -c 'import re,sys
-m=re.search(r"text=\"(?:Connect|Disconnect)[^\"]*\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", sys.stdin.read())
+    xy=$($A shell 'uiautomator dump /data/local/tmp/ui.xml >/dev/null 2>&1 && cat /data/local/tmp/ui.xml' 2>/dev/null | python3 -I -c 'import re,sys
+m=re.search(r"text=\"(?:Connect|Disconnect)(?: · [^\"]*)?\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"", sys.stdin.read())
 print((int(m[1])+int(m[3]))//2, (int(m[2])+int(m[4]))//2) if m else print("360 1095")')
-    $A shell rm -f /sdcard/ui.xml
+    $A shell rm -f /data/local/tmp/ui.xml 2>/dev/null || true
     $A shell input tap $xy
     ;;
 log) $A logcat -d -s GnosisVpnStub:I gnosisvpn:I AndroidRuntime:E DEBUG:F | tail -n "${2:-80}" ;;

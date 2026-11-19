@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 conf=${1:?usage: $0 PEER.conf [APK]}
 apk=${2:-app/build/outputs/apk/debug/app-debug.apk}
 PKG=org.gnosisvpn.stub.debug
-SERIAL=localhost:${REDROID_PORT:-5555}
+SERIAL=${ANDROID_SERIAL:-$(scripts/emulator.sh serial)}
 A="adb -s $SERIAL"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 fails=0
@@ -52,7 +52,9 @@ wait_for() { # wait up to $1 seconds for command "$@" to succeed
     return 1
 }
 status_is() { ui_text statusText | grep -q "Status: $1"; }
-open_app() { $A shell am start -n "$PKG/org.gnosisvpn.stub.MainActivity" >/dev/null; sleep 2; }
+# The WireGuard controls are on the developer screen (MainActivity), which is not exported since
+# the new UI; adb's shell cannot start it, root inside the container can.
+open_app() { docker exec "${REDROID_NAME:-gvpndroid-redroid}" am start -n "$PKG/org.gnosisvpn.stub.MainActivity" >/dev/null; sleep 2; }
 
 [ -r "$conf" ] || { echo "FAIL: cannot read $conf"; exit 1; }
 [ -s "$apk" ] || { echo "FAIL: no APK at $apk (run scripts/build.sh)"; exit 1; }
