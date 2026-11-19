@@ -12,6 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/do-build/lib.sh
 REPO=$(pwd)
+DO_TOKEN_FILE=$(token_file); export DO_TOKEN_FILE   # one token file for create, teardown and the deadline
 SIZE=${SIZE:-c-32}; REGION=${REGION:-ams3}; PROFILE=${PROFILE:-fast}; ABIS=${ABIS:-arm64-v8a x86_64}
 CLIENT_REV=${CLIENT_REV:-8a0e3be}; DEADLINE_S=${DEADLINE_S:-21600}
 TESTS=${TESTS:-1}; case $TESTS in 0|1) ;; *) echo "TESTS must be 0 or 1" >&2; exit 2 ;; esac   # 0 skips the contract tests
@@ -32,7 +33,7 @@ teardown() {
     rc=$?
     if [ -n "$id" ] && [ "${KEEP:-0}" = 1 ] && [ "$rc" = 0 ]; then
         # noclobber: a droplet kept meanwhile by another run is never overwritten; this one is deleted.
-        if (set -C; printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" > "$ST/current") 2>/dev/null; then
+        if (set -C; printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\ntoken_file=%q\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" "$DO_TOKEN_FILE" > "$ST/current") 2>/dev/null; then
             echo "KEPT droplet $id at $ip (deadline $NAME armed); iterate with scripts/do-build/rebuild.sh, end with scripts/do-build/down.sh"
             exit 0
         fi
@@ -55,7 +56,7 @@ python3 -I scripts/do-build/droplet.py create "$NAME" "$SIZE" "$REGION" "$ST/id_
 cpid=$!
 id=$(await_id "$ST/$NAME.create" $cpid)   # as long as the create runs: a late id still gets a deadline
 [ -n "$id" ] || { wait $cpid || true; echo "droplet creation failed" >&2; exit 1; }
-python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
+python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- env "DO_TOKEN_FILE=$DO_TOKEN_FILE" python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
 wait $cpid
 ip=$(sed -n 2p "$ST/$NAME.create" | cut -d' ' -f1)
 echo "droplet $id at $ip ($SIZE, \$$(sed -n 2p "$ST/$NAME.create" | cut -d' ' -f2)/h)"

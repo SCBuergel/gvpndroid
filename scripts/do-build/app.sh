@@ -14,6 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 . scripts/do-build/lib.sh
 REPO=$(pwd)
+DO_TOKEN_FILE=$(token_file); export DO_TOKEN_FILE   # one token file for create, teardown and the deadline
 SIZE=${SIZE:-s-8vcpu-16gb}; REGION=${REGION:-fra1}; DEADLINE_S=${DEADLINE_S:-3600}
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
 TASKS=${*:-assembleDebug lintDebug testDebugUnitTest}
@@ -44,7 +45,7 @@ python3 -I scripts/do-build/droplet.py create "$NAME" "$SIZE" "$REGION" "$ST/id_
 cpid=$!
 id=$(await_id "$W/create" $cpid)   # as long as the create runs: a late id still gets a deadline
 [ -n "$id" ] || { wait $cpid || true; echo "droplet creation failed" >&2; exit 1; }
-python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
+python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- env "DO_TOKEN_FILE=$DO_TOKEN_FILE" python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
 wait $cpid
 ip=$(sed -n 2p "$W/create" | cut -d' ' -f1)
 echo "droplet $id at $ip ($SIZE, \$$(sed -n 2p "$W/create" | cut -d' ' -f2)/h)"

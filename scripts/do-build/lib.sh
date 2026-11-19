@@ -1,4 +1,13 @@
 # Sourced by app.sh and run.sh.
+# token_file: the absolute path of the DigitalOcean token file ($DO_TOKEN_FILE, default
+# ~/do-api-token), so the deadline, which runs outside this environment, uses the same one.
+# The path only: the token itself never goes into a command line or a state file.
+token_file() {
+    local f=${DO_TOKEN_FILE:-$HOME/do-api-token}
+    case $f in "~"/*) f=$HOME/${f#"~/"} ;; esac
+    realpath -- "$f"
+}
+
 # await_id FILE PID: print line 1 of FILE (the droplet id droplet.py create prints) as soon as it
 # appears, or nothing once PID has exited without printing it. No time limit of its own: each API
 # call in droplet.py is bounded, and an id printed late must still reach the deadline and teardown.
