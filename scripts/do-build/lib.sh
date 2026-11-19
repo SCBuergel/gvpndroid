@@ -5,7 +5,7 @@
 token_file() {
     local f=${DO_TOKEN_FILE:-$HOME/do-api-token}
     case $f in "~"/*) f=$HOME/${f#"~/"} ;; esac
-    realpath -- "$f"
+    realpath -m -- "$f"   # -m: a missing file is droplet.py's error to report, not this one's
 }
 
 # await_id FILE PID: print line 1 of FILE (the droplet id droplet.py create prints) as soon as it
