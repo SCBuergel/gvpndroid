@@ -8,11 +8,12 @@ with the developer's key. Reads ~/.config/gvpndroid-secrets/{ntfy-topic,log-x255
 Usage: scripts/relay-read.py [SINCE]   SINCE: ntfy's since= (default 1h; e.g. 30m, 12h, all)
        scripts/relay-read.py -f        follow: print new parts as they arrive
 """
-import base64, hashlib, json, os, re, sys, time, urllib.request, zlib
+import base64, hashlib, json, os, re, sys, time, urllib.parse, urllib.request, zlib
 
 S = os.environ.get("GVPNDROID_SECRETS", os.path.expanduser("~/.config/gvpndroid-secrets"))
 TAG = b"gvpndroid-log-v1"
 MAX_LOG = 20_000_000   # a log part never unpacks to more; anyone can post to the topic
+MAX_ATT, ATT_SECS = 3_000_000, 60   # an attachment larger or slower than this is skipped
 
 
 def gunzip(z):
@@ -38,6 +39,34 @@ def unseal(body, priv):
     return gunzip(ChaCha20Poly1305(key).decrypt(b"\0" * 12, ct, e)).decode("utf-8", "replace")
 
 
+def ntfy_file(url):
+    """Only ntfy's own uploads (https://ntfy.sh/file/<id>.<ext>): anyone can post any link here."""
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    return (u.scheme == "https" and u.netloc == "ntfy.sh" and not u.query and not u.fragment
+            and re.fullmatch(r"/file/[A-Za-z0-9]+(\.[A-Za-z0-9]+)?", u.path) is not None)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args):
+        return None  # urllib then raises HTTPError for the 3xx
+
+
+def fetch(url, secs=ATT_SECS):
+    """The body, read within secs in all (a stream never ends); ValueError if over MAX_ATT bytes."""
+    end, out = time.monotonic() + secs, b""
+    with urllib.request.build_opener(_NoRedirect).open(url, timeout=20) as r:
+        while chunk := r.read1(65536):
+            out += chunk
+            if len(out) > MAX_ATT:
+                raise ValueError(f"over {MAX_ATT} bytes")
+            if time.monotonic() > end:
+                raise TimeoutError(f"not done in {secs} s")
+    return out
+
+
 def show(m, priv):
     if m.get("event") != "message":
         return
@@ -46,14 +75,12 @@ def show(m, priv):
     att = m.get("attachment") or {}
     note = None
     if att.get("url"):  # a backlog sent as one attachment (ntfy keeps it 3 hours)
-        url = att["url"]
-        # The topic is in every debug APK, so anyone can post here: fetch only ntfy's own files.
-        if not url.startswith("https://ntfy.sh/file/"):
-            note = f"(attachment link not from ntfy.sh, not fetched: {url[:60]})"
+        url = str(att["url"])
+        if not ntfy_file(url):
+            note = f"(attachment link not an ntfy.sh file, not fetched: {url[:60]})"
         else:
             try:
-                with urllib.request.urlopen(url, timeout=60) as r:
-                    body = r.read(3_000_000).decode("ascii", "replace").strip()
+                body = fetch(url).decode("ascii", "replace").strip()
             except Exception as ex:
                 note = f"(attachment not readable: {type(ex).__name__}; it may have expired)"
     try:
