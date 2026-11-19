@@ -94,13 +94,23 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         }
     }
 
+    /**
+     * Orders connect() and disconnect() against the end of a disconnect still on the worker: a
+     * connect issued meanwhile must not be overwritten by its DISCONNECTED (last action wins).
+     */
+    private val intentLock = Any()
+
     override fun connect() {
-        if (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED) return
-        wantConnected = true
-        lastError = null
-        coreRestarts = 0
-        set(Tunnel.State.CONNECTING, null)
+        synchronized(intentLock) {
+            if (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED) return
+            wantConnected = true
+            lastError = null
+            coreRestarts = 0
+            set(Tunnel.State.CONNECTING, null)
+        }
+        // Queued behind a pending disconnect, which leaves the state CONNECTING for this task.
         worker.execute {
+            if (!wantConnected) return@execute   // a later disconnect won
             try {
                 val props = loadProps()
                 startCoreOnce(props)
@@ -113,13 +123,16 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     }
 
     override fun disconnect() {
-        wantConnected = false
-        if (state == Tunnel.State.DISCONNECTED) return
-        set(Tunnel.State.DISCONNECTING, null)
+        synchronized(intentLock) {
+            wantConnected = false
+            if (state == Tunnel.State.DISCONNECTED) return
+            set(Tunnel.State.DISCONNECTING, null)
+        }
         worker.execute {
             disconnectCore()
             closeTun(stopService = true)
-            set(Tunnel.State.DISCONNECTED, null)
+            // A connect() since then keeps its CONNECTING; its task, queued behind this one, connects.
+            synchronized(intentLock) { if (!wantConnected) set(Tunnel.State.DISCONNECTED, null) }
         }
     }
 

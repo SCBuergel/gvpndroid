@@ -320,7 +320,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         loc = id; conn = Conn.CONNECTING; pause = null; cStart = now(); cDur = 60_000
         val tn = tunnel()
         tn.locations.firstOrNull { it.id == id }?.let { tn.selectLocation(it) }
-        if (tn.state == Tunnel.State.DISCONNECTED || tn.state == Tunnel.State.ERROR) hooks.connectVpn()
+        // Also while a disconnect is still running: the tunnel connects once it has finished.
+        if (tn.state == Tunnel.State.DISCONNECTED || tn.state == Tunnel.State.ERROR || tn.state == Tunnel.State.DISCONNECTING) hooks.connectVpn()
         save(); emit()
     }
 
