@@ -92,17 +92,7 @@ ssh_ 'cat /root/build.log' > app/build/remote/build.log
 grep -E 'BUILD|^e: |FAILED|JOB-EXIT|tests completed' app/build/remote/build.log | tail -8
 step build
 
-ssh_ 'cd /root/src/app/build && tar czf - outputs/apk test-results reports 2>/dev/null' > "$W/out.tgz.part"
-mv "$W/out.tgz.part" "$W/out.tgz"
-rm -rf app/build/remote/test-results app/build/remote/reports
-mkdir -p "$W/out" && tar -C "$W/out" -xzf "$W/out.tgz" && rm "$W/out.tgz"
-[ -d "$W/out/test-results" ] && mv "$W/out/test-results" "$W/out/reports" app/build/remote/
-if [ -f "$W/out/outputs/apk/debug/app-debug.apk" ]; then
-    mkdir -p app/build/outputs/apk/debug
-    mv "$W/out/outputs/apk/debug/app-debug.apk" app/build/outputs/apk/debug/app-debug.apk.part
-    mv app/build/outputs/apk/debug/app-debug.apk.part app/build/outputs/apk/debug/app-debug.apk
-fi
-rm -rf "$W/out"
+fetch_app_results "$W"
 step download
 grep -q '^JOB-EXIT 0' app/build/remote/build.log
 if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then scripts/check-apk.sh; fi

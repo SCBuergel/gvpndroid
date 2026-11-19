@@ -25,3 +25,28 @@ await_job() {
         sleep "${POLL_S:-15}"
     done
 }
+
+# fetch_app_results WORKDIR: copies back whichever of the APK, test-results and reports the build on
+# the droplet (via the caller's ssh_) produced: custom tasks or a lint failure leave some missing.
+# Fails on a failed connection or a corrupt archive.
+fetch_app_results() {
+    local d
+    # tar exits 2 on a missing member, so name only those that exist; none gives an empty download.
+    ssh_ 'cd /root/src/app/build 2>/dev/null || exit 0; set --
+          for d in outputs/apk test-results reports; do if [ -e "$d" ]; then set -- "$@" "$d"; fi; done
+          if [ $# -gt 0 ]; then tar czf - "$@"; fi' > "$1/out.tgz.part"
+    mv "$1/out.tgz.part" "$1/out.tgz"
+    rm -rf "$1/out"; mkdir -p "$1/out" app/build/remote
+    if [ -s "$1/out.tgz" ]; then tar -C "$1/out" -xzf "$1/out.tgz"; fi
+    rm "$1/out.tgz"
+    for d in test-results reports; do
+        rm -rf "app/build/remote/$d"
+        if [ -d "$1/out/$d" ]; then mv "$1/out/$d" app/build/remote/; fi
+    done
+    if [ -f "$1/out/outputs/apk/debug/app-debug.apk" ]; then
+        mkdir -p app/build/outputs/apk/debug
+        mv "$1/out/outputs/apk/debug/app-debug.apk" app/build/outputs/apk/debug/app-debug.apk.part
+        mv app/build/outputs/apk/debug/app-debug.apk.part app/build/outputs/apk/debug/app-debug.apk
+    fi
+    rm -rf "$1/out"
+}

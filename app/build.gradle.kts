@@ -50,8 +50,12 @@ android {
     testOptions {
         // The WireGuard config parser reads Build.VERSION; let android.jar stubs return defaults.
         unitTests.isReturnDefaultValues = true
-        // GnosisEmulatorEvalTest reads scripts/gnosis-emulator.sh: rerun it when the script changes.
-        unitTests.all { it.inputs.file("../scripts/gnosis-emulator.sh") }
+        // Tests that run or read these scripts: rerun them when a script changes.
+        unitTests.all {
+            it.inputs.file("../scripts/gnosis-emulator.sh")
+            it.inputs.file("../scripts/do-build/lib.sh")
+            it.inputs.file("../scripts/do-build/rebuild.sh")
+        }
     }
 
     buildFeatures { compose = true; buildConfig = true }
