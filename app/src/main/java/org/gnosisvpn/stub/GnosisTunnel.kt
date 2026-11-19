@@ -39,6 +39,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         get() = intent.wanted
         set(v) { intent.wanted = v }
     private val tuns = TunSlot<ParcelFileDescriptor> { wantConnected }
+    /** Retries a core start without network while a connect is under way; disconnect and shutdown wake it. */
+    private val startRetry = StartRetry({ wantConnected && state == Tunnel.State.CONNECTING })
     @Volatile private var status: org.json.JSONObject? = null
     /** Where to connect (exit address or destination id); read by the connect loop on every pass. */
     @Volatile private var target: String? = null
@@ -112,7 +114,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             if (!wantConnected) return@execute   // a later disconnect won
             try {
                 val props = loadProps()
-                startCoreOnce(props)
+                if (!startRetry.run(::waitForNetwork) { startCoreOnce(props) }) return@execute   // disconnected meanwhile
                 target = props.getProperty("destination") ?: error("gnosis.properties has no destination")
                 connectWhenReady()
             } catch (e: Exception) {
@@ -127,6 +129,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             intent.disconnect()
             set(Tunnel.State.DISCONNECTING, null)
         }
+        startRetry.wake()
         worker.execute {
             disconnectCore()
             closeTun(stopService = true)
@@ -164,6 +167,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     override fun shutdown() {
         wantConnected = false
+        startRetry.wake()
         val wasConnected = state != Tunnel.State.DISCONNECTED
         worker.execute {
             // Only when connected: a core still starting answers commands slowly (up to 60 s).
@@ -227,7 +231,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             // Only this (synchronized) method starts cores, and a refused start uses no number.
             coreGeneration = GnosisNative.coreGeneration() + 1
             val err = GnosisNative.startCore(data.path, cache.path, config, blokli, network) ?: break
-            if (err != "core already running" || waited >= 20_000) error("startCore: $err")
+            if (err != "core already running" || waited >= 20_000) throw startCoreError(err)
             Thread.sleep(1_000)
             waited += 1_000
         }
@@ -340,6 +344,12 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         }
     }
 
+    /** A core start found no network: stay CONNECTING and say so while StartRetry waits. */
+    private fun waitForNetwork(e: NoNetwork) {
+        LogBuffer.log("gnosis: no network yet, retrying the core start (${e.message})")
+        synchronized(intent) { if (wantConnected && state == Tunnel.State.CONNECTING) set(Tunnel.State.CONNECTING, "waiting for network") }
+    }
+
     /** Ends a connect attempt the core refused or gave up on: idle, with [why] for the UI. */
     private fun giveUp(why: String) {
         LogBuffer.log("gnosis: connect ended without a connection: $why")
@@ -398,7 +408,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 worker.execute {
                     if (!wantConnected) return@execute   // the user disconnected meanwhile
                     try {
-                        startCoreOnce(loadProps())   // waits out "core already running"
+                        // Waits out "core already running"; retries without network (one restart).
+                        if (!startRetry.run(::waitForNetwork) { startCoreOnce(loadProps()) }) return@execute
                         connectWhenReady()
                     } catch (e: Exception) {
                         giveUp("The Gnosis VPN core could not be restarted: ${e.javaClass.simpleName}: ${e.message}")
