@@ -126,6 +126,9 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         if (state == Tunnel.State.CONNECTED || state == Tunnel.State.CONNECTING) {
             // The tun stays up while the core moves: traffic is dropped, not sent around the VPN.
             // Off the worker, which may be inside the connect loop (it picks up the new target).
+            // Marked as a connect in progress first, so the core's "disconnected" while it switches
+            // is not taken for the core giving up.
+            connectLoop = true
             Thread {
                 disconnectCore()
                 wantConnected = true
@@ -219,6 +222,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         var lastRun = ""
         var lastConn = ""
         var lastConnType = ""
+        var lastTrouble = false
         var lastDests = ""
         while (true) {
             if (!coreRunning) { Thread.sleep(2_000); continue }
@@ -241,7 +245,10 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 // The core gave up on an attempt (back to disconnected while the user still wants
                 // the VPN and no Connect is being sent): say why instead of waiting forever.
                 val connType = connObj?.optString("type") ?: ""
-                if (wantConnected && !connectLoop && connType == "disconnected" && lastConnType in setOf("connecting", "reconnecting"))
+                // Only when the core also dropped its target: while it switches exits, opens a probe or
+                // waits for a route it reports "disconnected" but keeps the target.
+                val coreTarget = data.takeIf { it.has("target") && !it.isNull("target") }?.optString("target")
+                if (GnosisProtocol.coreGaveUp(wantConnected, connectLoop, lastConnType, connType, coreTarget))
                     worker.execute { giveUp(target?.let { find(it) }?.health?.why ?: "The exit did not answer the connection attempt.") }
                 lastConnType = connType
                 destinations = GnosisProtocol.destinations(data)
@@ -250,6 +257,15 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 chunkBytes = GnosisProtocol.chunkBytes(data)
                 // the session names the exit by the core's id; the UI keys exits by address
                 session = GnosisProtocol.session(data)?.let { s -> s.copy(exitId = find(s.exitId)?.address ?: s.exitId) }
+                // Diagnostics: when a stall or a reconnect starts, record what the core saw (the
+                // connection with its stall and PIX state, and nerd_stats: WireGuard counters
+                // history, SURBs). It goes to the log (and, in debug builds, the log relay).
+                val trouble = connObj?.let { it.has("stall") && !it.isNull("stall") } == true || connType == "reconnecting"
+                if (trouble && !lastTrouble) {
+                    LogBuffer.log("gnosis: diagnostics connection=${short(connObj?.toString() ?: "?", 1500)}")
+                    LogBuffer.log("gnosis: diagnostics nerd_stats=${short(GnosisNative.command(GnosisProtocol.NERD_STATS), 3000)}")
+                }
+                lastTrouble = trouble
                 val now = System.currentTimeMillis()
                 if (runMode == "running" && now >= balanceDue) {
                     GnosisProtocol.wallet(GnosisNative.command(GnosisProtocol.BALANCE))?.let { w ->

@@ -221,7 +221,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                 }
                 val reachable = e.routable && !e.offline
                 val newConn = when {
-                    s.reconnecting -> if (!reachable) Conn.PAUSED else Conn.RECONNECTING
+                    // A reconnect is a reconnect, also when the exit is unreachable for now (a network
+                    // change looks the same): the core keeps trying; the app invents no "offline, data lost".
+                    s.reconnecting -> Conn.RECONNECTING
                     s.step != null && s.step < s.steps - 1 && !s.stalled && tn.state != Tunnel.State.CONNECTED -> Conn.CONNECTING
                     s.awaitingPayment && (wallet?.trafficLevel == Tunnel.Level.EMPTY) -> Conn.PAUSED
                     // The exit holds traffic until it sees the payment on chain (about 2-3 min on a

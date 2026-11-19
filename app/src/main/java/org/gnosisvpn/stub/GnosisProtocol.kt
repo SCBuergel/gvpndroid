@@ -111,6 +111,14 @@ object GnosisProtocol {
         return if (last != null) "$text Last error: $last" else text
     }
 
+    /**
+     * The core gave up on a connect attempt: the user still wants the VPN, no Connect is being
+     * sent, the connection fell from connecting/reconnecting to disconnected, and the core has no
+     * target any more. While it switches exits, probes or waits for a route it keeps the target.
+     */
+    fun coreGaveUp(wantConnected: Boolean, connectLoop: Boolean, before: String, now: String, coreTarget: String?): Boolean =
+        wantConnected && !connectLoop && now == "disconnected" && before in setOf("connecting", "reconnecting") && coreTarget.isNullOrEmpty()
+
     /** Why the core refused a connect, in words, or null when it took it (connecting, waiting, already connected). */
     fun connectRefusal(reply: String?): String? {
         if (reply.isNullOrEmpty()) return "The Gnosis VPN core did not answer."

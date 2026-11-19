@@ -122,7 +122,7 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
 
 /**
  * DEBUG ONLY. REMOVE BEFORE PRODUCTION. Debug builds send their log to the developer (encrypted,
- * every 10 s, on by default). This bar says so on every screen, from the first one, and turns it off.
+ * every 30 s at first, on by default). This bar says so on every screen, from the first one, and turns it off.
  */
 @Composable
 private fun DebugLogBar(ui: UiState) {
@@ -133,7 +133,7 @@ private fun DebugLogBar(ui: UiState) {
         .padding(start = 16.dp, end = 12.dp, top = 6.dp, bottom = 6.dp).testTag("debug-log-bar"),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Ms("bug_report", size = 18.dp, tint = p.on)
-        Text(if (ui.logRelayOn) "Debug build: your log goes to the developer every ${DebugLogRelay.INTERVAL_SEC} s (encrypted). On by default."
+        Text(if (ui.logRelayOn) "Debug build: your log goes to the developer (encrypted), ${DebugLogRelay.SCHEDULE}. On by default."
              else "Debug build: log sending to the developer is off.",
             style = T.bs, color = p.on, modifier = Modifier.weight(1f))
         Sw(ui.logRelayOn, { set(!ui.logRelayOn) })

@@ -150,4 +150,17 @@ class GnosisLiveDataTest {
         val early = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"establish_wg_tunnel"},"pix":null}"""))!!
         assertTrue(early.step!! < early.steps - 1)
     }
+
+    @Test fun theCoreGaveUpOnlyWithoutATarget() {
+        // the core dropped the attempt: say why
+        assertTrue(GnosisProtocol.coreGaveUp(true, false, "connecting", "disconnected", null))
+        assertTrue(GnosisProtocol.coreGaveUp(true, false, "reconnecting", "disconnected", ""))
+        // switching exits, probing or waiting for a route: "disconnected" but the core keeps a target
+        assertFalse(GnosisProtocol.coreGaveUp(true, false, "connecting", "disconnected", "gvpn-fra-1-xp4e"))
+        // a Connect is being sent, the user disconnected, or it was never an attempt
+        assertFalse(GnosisProtocol.coreGaveUp(true, true, "connecting", "disconnected", null))
+        assertFalse(GnosisProtocol.coreGaveUp(false, false, "connecting", "disconnected", null))
+        assertFalse(GnosisProtocol.coreGaveUp(true, false, "disconnected", "disconnected", null))
+        assertFalse(GnosisProtocol.coreGaveUp(true, false, "connected", "disconnected", null))
+    }
 }

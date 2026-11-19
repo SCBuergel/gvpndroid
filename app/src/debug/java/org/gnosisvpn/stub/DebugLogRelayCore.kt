@@ -28,7 +28,8 @@ object DebugLogRelayCore {
      * backend the app is excluded from its own VPN (GnosisVpnService: addDisallowedApplication),
      * so the relay posts from the device's own network and IP, also while the VPN is on, and that
      * IP's budget is shared with nothing else of ours. A token bucket keeps the relay under it: it holds up to [CAP]
-     * messages and refills [PER_DAY] a day, so no rolling day gets more than CAP + PER_DAY = 245.
+     * messages and refills [PER_DAY] a day, so no rolling day gets more than CAP + PER_DAY = 242. A full
+     * bucket covers the app's start window (every 30 s for 15 min).
      * Ordinary log lines leave [RESERVE] in the bucket. Lines that look like a problem
      * ([URGENT]) may use the reserve.
      */
@@ -43,9 +44,9 @@ object DebugLogRelayCore {
         fun exhausted() { tokens = 0.0 }
 
         companion object {
-            const val CAP = 25.0
-            const val PER_DAY = 220.0
-            const val RESERVE = 8.0
+            const val CAP = 32.0
+            const val PER_DAY = 210.0
+            const val RESERVE = 2.0
         }
     }
 
@@ -56,6 +57,8 @@ object DebugLogRelayCore {
 
     /** Longest plaintext (gzip output) per message: sealed and base64-encoded it stays under ntfy's 4 KB message limit. */
     const val MAX_PLAIN = 2900
+    /** Largest gzip'd backlog sent as one attachment: sealed and base64-encoded it stays under ntfy's 2 MB per file. */
+    const val MAX_ATTACHMENT_PLAIN = 1_400_000
     private const val MAX_LINE = 2500
 
     /**
@@ -103,6 +106,14 @@ object DebugLogRelayCore {
         return b.toByteArray()
     }
 
+    /**
+     * The start window: for [startMin] minutes after [startedAt] the relay sends at most every
+     * [intervalSec] seconds, unless a line looks like a problem ([urgent]); afterwards on every tick
+     * (the budget then decides).
+     */
+    fun mayFlush(now: Long, startedAt: Long, lastSentAt: Long, urgent: Boolean, startMin: Long = 15, intervalSec: Long = 30): Boolean =
+        urgent || now - startedAt >= startMin * 60_000 || now - lastSentAt >= intervalSec * 1000
+
     /** What one [Queue.flush] did. */
     enum class Outcome { NOTHING, SENT, BUDGET, LIMITED, FAILED }
 
@@ -111,7 +122,7 @@ object DebugLogRelayCore {
      * Plain Kotlin, so the send logic is unit-tested; DebugLogRelay feeds it from LogBuffer and
      * gives it the HTTP POST.
      */
-    class Queue(private val maxPending: Int = 6000) {
+    class Queue(private val maxPending: Int = 6000, private val maxAttachment: Int = MAX_ATTACHMENT_PLAIN) {
         /** LogBuffer line count up to which lines have been taken. */
         var cursor = 0L
             private set
@@ -131,6 +142,9 @@ object DebugLogRelayCore {
             while (pending.size > maxPending) { pending.removeFirst(); dropped++ }
         }
 
+        /** A waiting line looks like a problem (the relay's own lines excluded): it may go out at once. */
+        fun hasUrgent(): Boolean = pending.any { !it.contains(OWN) && URGENT.containsMatchIn(it) }
+
         /** Switched off: forget everything up to [now] (LogBuffer's count); nothing old is sent later. */
         fun reset(now: Long) { pending.clear(); dropped = 0; cursor = now }
 
@@ -139,16 +153,31 @@ object DebugLogRelayCore {
          * gets the gzip'd piece and its message number and returns the HTTP status, or -1 without
          * a connection. Only lines of pieces that were accepted leave the queue.
          */
-        fun flush(header: String, budget: Budget, send: (ByteArray, Long) -> Int): Outcome {
+        fun flush(header: String, budget: Budget, send: (ByteArray, Long, Boolean) -> Int): Outcome {
             if (pending.isEmpty() && dropped == 0L) return Outcome.NOTHING
-            val urgent = pending.any { !it.contains(OWN) && URGENT.containsMatchIn(it) }
+            val urgent = hasUrgent()
             // The loss note is a line of its own, so it goes out once, in the first piece.
             val note = if (dropped > 0) listOf("[$dropped lines were not sent: log ring or relay buffer full]") else emptyList()
             val lines = note + pending.toList()
+            val pieces = pack(header, lines)
+            // More than one message's worth: everything in ONE attachment (ntfy keeps bodies over
+            // 4 KB as an attachment, up to 2 MB, and counts it as one message), so a backlog never
+            // trails behind the budget and an incident arrives within one tick.
+            if (pieces.size > 1) {
+                val all = gzip(text(header, lines, 0, lines.size))
+                if (all.size <= maxAttachment) {
+                    if (!budget.canSend(urgent)) return Outcome.BUDGET
+                    return when (send(all, seq + 1, true)) {
+                        in 200..299 -> { budget.spend(); seq++; dropped = 0; pending.clear(); Outcome.SENT }
+                        429 -> { budget.exhausted(); Outcome.LIMITED }
+                        else -> Outcome.FAILED
+                    }
+                }
+            }
             var sent = false
-            for ((plain, n) in pack(header, lines)) {
+            for ((plain, n) in pieces) {
                 if (!budget.canSend(urgent)) return if (sent) Outcome.SENT else Outcome.BUDGET
-                when (send(plain, seq + 1)) {
+                when (send(plain, seq + 1, false)) {
                     in 200..299 -> {
                         budget.spend(); seq++; sent = true
                         var k = n

@@ -317,6 +317,7 @@ class GnosisEngineTest {
         val m = e.moments().first()
         assertEquals("Waiting for ${e.ex(e.loc).city} to see your payment.", m.lead)
         assertFalse(m.text.contains("isn’t protected"))
+        assertEquals("Waiting for the exit to see your payment; traffic resumes by itself.", e.ongoingNote()!!.body)
         // the hold ends: plain connected
         tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 600_000_000, payment = T.Payment.FUNDED); e.tick()
         assertFalse(e.awaitingPayment)
@@ -351,7 +352,14 @@ class GnosisEngineTest {
         // the exit went away while reconnecting
         tn.locations = listOf(ger().copy(health = ger().health!!.copy(reachable = false, unrecoverable = true)), uk())
         tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick()
-        assertEquals("S10", e.screenCode().first)
+        // a reconnect, not "went offline, data lost": the core keeps trying (the phone on 2026-11-18:
+        // a Wi-Fi to mobile switch looked exactly like this)
+        assertEquals(Conn.RECONNECTING, e.conn); assertNull(e.pause)
+        val m = e.moments().first()
+        assertEquals("Reconnecting to ${e.ex(e.loc).city}.", m.lead)
+        assertFalse(m.text, m.text.contains("lost"))
+        assertEquals(listOf("Best available" to "bestAvail"), m.btns)
+        assertEquals("Traffic is held until the connection is back.", e.ongoingNote()!!.body)
         e.act("bestAvail")
         assertEquals("0xE7FD", tn.selected.last())
     }

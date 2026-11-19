@@ -75,7 +75,7 @@ class App : Application() {
         instance = this
         org.gnosisvpn.stub.ui.Notifier.channels(this)
         installCrashRecorder()
-        // DEBUG ONLY. REMOVE BEFORE PRODUCTION: encrypted log to the developer every 10 s, on by
+        // DEBUG ONLY. REMOVE BEFORE PRODUCTION: encrypted log to the developer (every 30 s at first), on by
         // default and switchable. It is real only in debug builds; release builds get a no-op stub.
         DebugLogRelay.start(this)
         store = ConfigStore(this)

@@ -3,7 +3,7 @@
 
 Prints the logs that debug builds of the app sent to the developer's ntfy.sh topic, decrypted
 with the developer's key. Reads ~/.config/gvpndroid-secrets/{ntfy-topic,log-x25519.key}
-($GVPNDROID_SECRETS overrides the folder). ntfy.sh keeps messages for 12 hours.
+($GVPNDROID_SECRETS overrides the folder). ntfy.sh keeps messages for 12 hours and attachments (backlogs) for 3.
 
 Usage: scripts/relay-read.py [SINCE]   SINCE: ntfy's since= (default 1h; e.g. 30m, 12h, all)
        scripts/relay-read.py -f        follow: print new parts as they arrive
@@ -29,6 +29,13 @@ def show(m, priv):
         return
     t = time.strftime("%H:%M:%S", time.localtime(m["time"]))
     body = m.get("message", "")
+    att = m.get("attachment") or {}
+    if att.get("url"):  # a backlog sent as one attachment (ntfy keeps it 3 hours)
+        try:
+            with urllib.request.urlopen(att["url"], timeout=60) as r:
+                body = r.read().decode("ascii", "replace").strip()
+        except Exception as ex:
+            body = f"(attachment not readable: {type(ex).__name__}, it may have expired)"
     try:
         text = unseal(body, priv) if body.startswith(TAG.decode() + " ") else "(not a sealed log part)"
     except Exception as ex:  # a part that is not ours or is damaged: say so, keep going

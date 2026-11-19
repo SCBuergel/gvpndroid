@@ -33,9 +33,11 @@ fun Engine.moment(): Msg? {
             if (balanceLow()) listOf("Add funds" to "addData") else null)
         null -> {}
     }
-    if (conn == Conn.RECONNECTING) return if (lockdown)
-        Msg(Tone.LAV, "lock", "Lockdown on.", "Internet is blocked while Gnosis VPN reconnects to ${e.city}.")
-    else Msg(Tone.WARN, "warning", "Reconnecting.", "Lockdown is off, so traffic isn’t protected until the connection is back.")
+    // The tunnel stays up while the core reconnects in place, so traffic is held, not sent around
+    // the VPN, with or without Lockdown (as gvpndows: a reconnect is shown as a reconnect).
+    if (conn == Conn.RECONNECTING) return if (!e.routable || e.offline)
+        Msg(Tone.WARN, "sync_problem", "Reconnecting to ${e.city}.", "${e.city} can’t be reached right now. Gnosis VPN keeps trying; traffic is held meanwhile, so nothing leaks.", listOf("Best available" to "bestAvail"))
+    else Msg(Tone.WARN, "sync_problem", "Reconnecting to ${e.city}.", "Traffic is held until the connection is back, so nothing leaks. This can follow a network change.")
     if (conn == Conn.CONNECTING) return Msg(Tone.INFO, "info", "Connecting to ${e.city}.",
         if (!metered) "Opening a route through the mixnet." else if (a > 0) "Uses the ${a.roundToInt()} MB left here." else if (free) "Setting aside your free ${chunkTxt()} at ${e.city}." else "Setting aside ${chunkTxt()} at ${e.city}.")
     if (conn == Conn.CONNECTED && awaitingPayment) return Msg(if (paymentFailed) Tone.WARN else Tone.INFO, "hourglass_top", "Waiting for ${e.city} to see your payment.",
@@ -142,8 +144,9 @@ fun Engine.ongoingNote(): Note? {
     return when (conn) {
         Conn.IDLE -> null
         Conn.CONNECTING -> Note("ongoing", "Connecting to ${e.city}", "Opening channels to relays…", listOf("Cancel" to "cancel"))
-        Conn.CONNECTED -> Note("ongoing", "Connected · ${e.city}", if (left() > 0) "${mb(left())} left" + (timeLeft()?.let { " · $it" } ?: "") else "Rotating relays", listOf("Disconnect" to "disconnect"))
-        Conn.RECONNECTING -> Note("ongoing", "Reconnecting…", if (lockdown) "Lockdown on: internet blocked until the connection is back." else "Traffic isn’t protected until the connection is back.", listOf("Disconnect" to "disconnect"))
+        Conn.CONNECTED -> if (awaitingPayment) Note("ongoing", "Connected · ${e.city}", "Waiting for the exit to see your payment; traffic resumes by itself.", listOf("Disconnect" to "disconnect"))
+        else Note("ongoing", "Connected · ${e.city}", if (left() > 0) "${mb(left())} left" + (timeLeft()?.let { " · $it" } ?: "") else "Rotating relays", listOf("Disconnect" to "disconnect"))
+        Conn.RECONNECTING -> Note("ongoing", "Reconnecting to ${e.city}…", "Traffic is held until the connection is back.", listOf("Disconnect" to "disconnect"))
         Conn.PAUSED -> {
             val why = when (pause) { Pause.NODATA -> "No data left at ${e.city}."; Pause.OFFLINE -> "${e.city} went offline."; Pause.BALANCE -> "No data and none in your balance."; else -> "Payment failed; retrying." }
             Note("ongoing", "Internet paused", "$why Traffic stays blocked.", when (pause) {

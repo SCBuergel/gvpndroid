@@ -307,7 +307,7 @@ private fun SettingsGeneral(eng: Engine, act: Act, debug: Boolean, extra: Settin
         if (DebugLogRelay.available) {
             val ctx = androidx.compose.ui.platform.LocalContext.current
             val flip = { ui.logRelayOn = !ui.logRelayOn; DebugLogRelay.setOn(ctx, ui.logRelayOn) }
-            Li("Send log to the developer", "Debug builds only. Every ${DebugLogRelay.INTERVAL_SEC} s, encrypted, to the developer’s relay. On by default.", "bug_report", flip, divider = true) { Sw(ui.logRelayOn, flip) }
+            Li("Send log to the developer", "Debug builds only. Encrypted, ${DebugLogRelay.SCHEDULE}, to the developer’s relay. On by default.", "bug_report", flip, divider = true) { Sw(ui.logRelayOn, flip) }
         }
     }
     if (extra.rows.isNotEmpty()) {

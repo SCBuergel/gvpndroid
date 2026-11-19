@@ -104,14 +104,16 @@ Building with redroid running leaves too little memory on this machine: stop it
 
 ## Developer log relay (DEBUG BUILDS ONLY, remove before production)
 
-Debug builds send the app's log (app and core lines) to the developer every 10 s. It is
-**on by default**. A bar at the top of every screen says so and has an off switch. The same
-switch is in Settings → Logs. The parts are gzip'd and sealed to the developer's X25519 key, with
-the same construction as gvpndows' identity backup but the tag `gvpndroid-log-v1`, then posted to
-a private ntfy.sh topic. Anonymous ntfy.sh allows 250 messages a day per IP. A token bucket
-(25 messages, refilled at 220 a day) therefore sends every 10 s for the first few minutes, then
-about every 6–7 minutes, with the new lines collected in between. Lines that look like a problem
-(error, failed, stall, …) can use a reserve and go at once.
+Debug builds send the app's log (app and core lines) to the developer: collected every 10 s,
+sent every 30 s for the first 15 minutes after the app starts, then as ntfy's limit allows (every
+few minutes). It is **on by default**; a bar at the top of every screen and the Android 12+ splash
+say so, with an off switch (also in Settings → Logs). The parts are gzip'd and sealed to the
+developer's X25519 key (the construction of gvpndows' identity backup, tag `gvpndroid-log-v1`)
+and posted to a private ntfy.sh topic. Anonymous ntfy.sh allows 250 messages a day per IP: a token
+bucket (32 messages, refilled at 210 a day) covers the start window and stays
+under it. Lines that look like a problem (error, failed, stall, …) go out at once. A backlog of
+more than one message goes as one sealed attachment (up to 2 MB, kept 3 hours), so nothing trails.
+When a stall or reconnect starts, the app logs the core's connection state and nerd_stats.
 
 - Code: `app/src/debug/java/.../DebugLogRelay.kt` and `DebugLogRelayCore.kt`; the splash
   notice in `app/src/debugRelay/res` (added only when the topic and key are present); the
