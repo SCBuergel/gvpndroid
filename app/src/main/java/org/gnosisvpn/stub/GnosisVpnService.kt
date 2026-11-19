@@ -54,13 +54,11 @@ class GnosisVpnService : VpnService() {
             .setMtu(mtu)
             .addDisallowedApplication(packageName)
         // The core sends DNS servers as a comma-separated list, e.g. "1.1.1.1,8.8.8.8".
-        val servers = dns?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty().ifEmpty { listOf(DEFAULT_DNS) }
-        servers.forEach { builder.addDnsServer(it) }
+        GnosisProtocol.dnsServers(dns).forEach { builder.addDnsServer(it) }
         return builder.establish()
     }
 
     companion object {
-        private const val DEFAULT_DNS = "9.9.9.9"
         @Volatile private var running = CompletableFuture<GnosisVpnService>()
 
         /** The running instance, if any (no start). */

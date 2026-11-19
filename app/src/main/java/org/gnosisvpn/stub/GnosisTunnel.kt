@@ -436,8 +436,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         val id = event.getLong("request_id")
         val address = event.getString("address")
         val mtu = event.getInt("mtu")
-        val dns = event.optString("dns")
-        val params = "$address|$mtu|$dns"
+        val dns = GnosisProtocol.setupDns(event)
+        val params = "$address|$mtu|${dns.orEmpty()}"
         // After a disconnect, give-up or shutdown began, the request is refused (tuns checks
         // wantConnected under the lock closeTun takes), so it cannot reopen the VPN.
         val refuse = {
@@ -458,7 +458,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 TunSlot.Answer.BUILD_NEW -> {}
             }
             val service = GnosisVpnService.obtain(context)
-            val pfd = service.establish(address, mtu, dns.ifEmpty { null })
+            val pfd = service.establish(address, mtu, dns)
                 ?: error("establish() returned null (VPN permission missing?)")
             if (!tuns.install(pfd, params) { hand(it, "tun $address mtu $mtu") }) refuse()
         } catch (e: Exception) {

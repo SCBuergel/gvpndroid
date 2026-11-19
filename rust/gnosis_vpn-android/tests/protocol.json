@@ -294,5 +294,26 @@
   "_comment": "Replies of GnosisNative.command without a core Response. transient: the core never took the command (not running, exiting, too slow): retry; otherwise a refusal.",
   "transient": "{\"error\":\"core dropped the command\",\"transient\":true}",
   "refused": "{\"error\":\"command is null or not UTF-8\",\"transient\":false}"
+ },
+ "setup_tunnel": {
+  "_comment": "Events lib.rs handle_request pushes for RequestToRoot::SetupTunnel; dns is the core's Option<String>: null when the config sets dns.overwrite = false.",
+  "with_dns": {
+   "type": "setup_tunnel",
+   "generation": 1,
+   "request_id": 3,
+   "address": "10.128.0.2/32",
+   "mtu": 1280,
+   "dns": "1.1.1.1,8.8.8.8",
+   "peer_ips": 2
+  },
+  "no_dns": {
+   "type": "setup_tunnel",
+   "generation": 1,
+   "request_id": 3,
+   "address": "10.128.0.2/32",
+   "mtu": 1280,
+   "dns": null,
+   "peer_ips": 2
+  }
  }
 }

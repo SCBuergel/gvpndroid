@@ -139,6 +139,18 @@ object GnosisProtocol {
         return if (d.optString("type") == "unable_to_connect") whyNot(d.optJSONObject("route_health")) else null
     }
 
+    /**
+     * The DNS servers a setup_tunnel event asks for (comma-separated), or null when the core sets
+     * none: its dns is an Option, sent as JSON null, which Android's optString reads as "null".
+     */
+    fun setupDns(event: JSONObject): String? = str(event, "dns")
+
+    /** The servers for the tun: the core's list, or [DEFAULT_DNS] when it gave none. */
+    fun dnsServers(dns: String?): List<String> =
+        dns?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty().ifEmpty { listOf(DEFAULT_DNS) }
+
+    const val DEFAULT_DNS = "9.9.9.9"
+
     private fun str(o: JSONObject, k: String) = o.takeIf { it.has(k) && !it.isNull(k) }?.optString(k)?.takeIf { it.isNotEmpty() }
 
     /** The connect phases in order (ConnectPhase), with readable names. */
