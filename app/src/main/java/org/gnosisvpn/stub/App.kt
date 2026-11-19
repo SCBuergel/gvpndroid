@@ -50,12 +50,12 @@ class App : Application() {
      * the next process starts on Gnosis.
      */
     fun ensureGnosis() {
-        if (usesGnosis || !canUseGnosis() || GnosisSetup.choseWireGuard(noBackupFilesDir)) return
+        if (!shouldSetUpGnosis(usesGnosis, canUseGnosis(), GnosisSetup.choseWireGuard(noBackupFilesDir))) return
         Thread {
             runCatching { switchBackend(true) }
                 .onSuccess {
                     android.os.Handler(mainLooper).post {
-                        if (canSwapBackend(tunnel.state)) { selectBackend(); LogBuffer.log("gnosis backend set up for the app") }
+                        if (swapWhenDown(tunnel.state, ::selectBackend)) LogBuffer.log("gnosis backend set up for the app")
                         else LogBuffer.log("gnosis backend set up; used from the next start (tunnel is ${tunnel.state})")
                     }
                 }
@@ -63,8 +63,11 @@ class App : Application() {
         }.start()
     }
 
-    /** Restarts the Gnosis core (after a failure). */
-    fun restartGnosis() { selectBackend() }
+    /** Restarts the Gnosis core (after a failure); a pending switch from WireGuard waits for the tunnel to be down. */
+    fun restartGnosis() {
+        if (usesGnosis) selectBackend()
+        else if (!swapWhenDown(tunnel.state, ::selectBackend)) LogBuffer.log("restart: not while the WireGuard tunnel is ${tunnel.state}")
+    }
 
     val ui: org.gnosisvpn.stub.ui.UiState by lazy {
         val prefs = getSharedPreferences("ui", MODE_PRIVATE)
@@ -157,7 +160,7 @@ class App : Application() {
      * still has the old backend. Turning Gnosis off keeps its node identity.
      */
     fun switchBackend(toGnosis: Boolean) {
-        if (toGnosis) GnosisSetup.enable(this) else GnosisSetup.disable(this)
+        if (toGnosis) GnosisSetup.enable(this) else GnosisSetup.disable(noBackupFilesDir)
     }
 
     /** Whether the Gnosis core has created a node identity (which then controls the node's funds). */
@@ -208,5 +211,12 @@ class App : Application() {
 
         /** Backends are swapped only while the tunnel is down: the old one's VpnService is disabled. */
         fun canSwapBackend(state: Tunnel.State) = state == Tunnel.State.DISCONNECTED || state == Tunnel.State.ERROR
+
+        /** Runs [swap] (a backend change) only if [canSwapBackend]; returns whether it ran. */
+        fun swapWhenDown(state: Tunnel.State, swap: () -> Unit) = canSwapBackend(state).also { if (it) swap() }
+
+        /** Whether to set Gnosis up by itself: on an install that can run it and never chose WireGuard. */
+        fun shouldSetUpGnosis(usesGnosis: Boolean, canUseGnosis: Boolean, choseWireGuard: Boolean) =
+            !usesGnosis && canUseGnosis && !choseWireGuard
     }
 }

@@ -27,10 +27,15 @@ object GnosisSetup {
         val template = context.assets.open("$ASSETS/config.toml").bufferedReader().readText()
         val config = assembleConfig(template, File(share, "geoip.mmdb").path, zk.path)
         GnosisNative.checkConfig(config)?.let { error("bundled config rejected: $it") }
-        File(nb, "gnosis.toml").writeText(config)
-        val props = File(nb, "gnosis.properties")
-        if (!props.exists()) copyAsset(context, "$ASSETS/gnosis.properties", props)
-        chooseWireGuard(nb, false)
+        install(nb, config) { context.assets.open("$ASSETS/gnosis.properties") }
+    }
+
+    /** Writes gnosis.toml and, if there is none, gnosis.properties from [defaultProps]; clears a WireGuard choice. */
+    fun install(noBackup: File, config: String, defaultProps: () -> java.io.InputStream) {
+        File(noBackup, "gnosis.toml").writeText(config)
+        val props = File(noBackup, "gnosis.properties")
+        if (!props.exists()) defaultProps().use { input -> props.outputStream().use { input.copyTo(it) } }
+        File(noBackup, WIREGUARD_CHOSEN).delete()
     }
 
     /**
@@ -44,21 +49,15 @@ object GnosisSetup {
         template.lineSequence().filterNot { it.trim().startsWith("version") }.forEach { append(it).append('\n') }
     }
 
-    fun disable(context: Context) {
-        chooseWireGuard(context.noBackupFilesDir, true)
-        File(context.noBackupFilesDir, "gnosis.properties").delete()
-    }
-
-    /** Records (or clears) the user's choice of WireGuard, so a new process does not set up Gnosis again. */
-    fun chooseWireGuard(noBackup: File, chosen: Boolean) {
-        val f = File(noBackup, WIREGUARD_CHOSEN)
-        if (chosen) f.writeText("") else f.delete()
+    /** Switches to WireGuard and records that choice, so a new process does not set up Gnosis again. */
+    fun disable(noBackup: File) {
+        File(noBackup, WIREGUARD_CHOSEN).writeText("")
+        File(noBackup, "gnosis.properties").delete()
     }
 
     fun choseWireGuard(noBackup: File) = File(noBackup, WIREGUARD_CHOSEN).exists()
 
     private const val WIREGUARD_CHOSEN = "backend-wireguard"
-
 
     /** The identity files of the configured network, if the core has created them. */
     private fun identityDir(context: Context): File? {

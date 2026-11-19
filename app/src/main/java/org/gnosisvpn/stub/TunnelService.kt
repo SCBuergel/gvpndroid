@@ -28,18 +28,18 @@ class TunnelService : Service() {
         }
     }
 
-    /** The tunnel [listener] was added to: App.tunnel may be another one by onDestroy. */
-    private var listened: Tunnel? = null
+    /** On the tunnel of onCreate: App.tunnel may be another one by onDestroy. */
+    private var subscription: Subscription? = null
 
     override fun onCreate() {
         super.onCreate()
         running = true
-        listened = tunnel.also { it.addListener(listener) }
+        subscription = Subscription(tunnel, listener)
     }
 
     override fun onDestroy() {
         running = false
-        listened?.removeListener(listener); listened = null
+        subscription?.cancel(); subscription = null
         super.onDestroy()
     }
 
@@ -123,4 +123,10 @@ class TunnelService : Service() {
             }
         }
     }
+}
+
+/** [listener] added to [tunnel]; [cancel] removes it from that same tunnel. */
+internal class Subscription(private val tunnel: Tunnel, private val listener: Tunnel.Listener) {
+    init { tunnel.addListener(listener) }
+    fun cancel() = tunnel.removeListener(listener)
 }
