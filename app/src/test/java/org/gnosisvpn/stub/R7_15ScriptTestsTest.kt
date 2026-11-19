@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The scripts' own regression tests run in the gate (R7-15): relay-read.py's (R6-1, R6-2, loopback
- * servers only) and await_job's. test-await-id.sh (~35 s) stays a manual check (README).
+ * servers only) and await_job's. test-await-id.sh (~35 s) stays a manual check (AGENTS.md).
  * HOME and GVPNDROID_SECRETS point at an empty folder, so no secret can be read.
  */
 class R7_15ScriptTestsTest {
