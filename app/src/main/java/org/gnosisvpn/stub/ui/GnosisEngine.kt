@@ -39,6 +39,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     /** The user stopped a live tunnel: until the tunnel takes the stop (or they connect again), its last state brings no connection back. */
     private var stopping = false
     private var stopAt = 0.0
+    /** The exit the user asked for, until the core reports a session there or stops: an older session's exit does not replace it. */
+    private var pendingExit: String? = null
     private var lastBought: Long? = null
     private var lastPayFail = false
     override val awaitingPayment: Boolean
@@ -58,7 +60,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         exits = mutableListOf(); loc = ""; lockdown = false; alwaysOn = false
         balance = 0.0; added = 0.0; popover = false; warm = false; autoRenew = true; arPast4 = true; free = false
         syncT = 0.0
-        lastIds = ""; lastState = null; wallet = null; session = null; lastBought = null; dataKnown = false; stopping = false
+        lastIds = ""; lastState = null; wallet = null; session = null; lastBought = null; dataKnown = false; stopping = false; pendingExit = null
         load()
     }
 
@@ -192,15 +194,17 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         val st = tn.state
         // The stop has arrived once the tunnel leaves CONNECTED/CONNECTING; one that never does is given up after STOP_WAIT s.
         if ((st != Tunnel.State.CONNECTED && st != Tunnel.State.CONNECTING) || t - stopAt > STOP_WAIT) stopping = false
-        val s = tn.session?.takeIf { !stopping && st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING }
+        val s = tn.session?.takeIf { !stopping && st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING && (pendingExit ?: it.exitId) == it.exitId }
         session = s
+        if (s != null) pendingExit = null
         // alloc/free describe the live session only: a new session buys its own chunk.
         if (s == null || st == Tunnel.State.ERROR) { alloc.clear(); allocAt.clear(); free = false }
         if (st != lastState) {
             if (st == Tunnel.State.ERROR && lastState != null) {
                 conn = Conn.IDLE
-                setFlash(Tone.BAD, "Couldn’t connect to ${ex(loc).city}.", tn.lastError ?: "Try again, or pick another location.")
+                setFlash(Tone.BAD, "Couldn’t connect to ${ex(pendingExit ?: loc).city}.", tn.lastError ?: "Try again, or pick another location.")
             }
+            if (st == Tunnel.State.DISCONNECTED || st == Tunnel.State.ERROR) pendingExit = null
             if (st == Tunnel.State.CONNECTED) runCatching { org.gnosisvpn.stub.App.instance.readLockdown() }.getOrNull()?.let { lockdown = it; alwaysOn = alwaysOn || it }
             lastState = st
         }
@@ -324,7 +328,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override fun doConnect(id: String) {
         stopping = false
         home(); sheet = null; fullMsg = null; flash = null; fq.clear(); offConfirm = false; better = null
-        loc = id; conn = Conn.CONNECTING; pause = null; cStart = now(); cDur = 60_000
+        loc = id; pendingExit = id; conn = Conn.CONNECTING; pause = null; cStart = now(); cDur = 60_000
         val tn = tunnel()
         tn.locations.firstOrNull { it.id == id }?.let { tn.selectLocation(it) }
         // Also while a disconnect is still running: the tunnel connects once it has finished.
@@ -339,6 +343,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     private fun stopTunnel() {
         val st = tunnel().state
         stopping = st == Tunnel.State.CONNECTED || st == Tunnel.State.CONNECTING; stopAt = t
+        pendingExit = null   // no pick is wanted any more
         hooks.disconnectVpn()
     }
 
