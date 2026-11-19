@@ -60,6 +60,10 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     @Volatile override var lastError: String? = null; private set
     /** True while connectWhenReady is issuing Connect: a "disconnected" then is not the core giving up. */
     @Volatile private var connectLoop = false
+    /** Cores restarted after exiting by themselves since the last connection (or user connect). */
+    @Volatile private var coreRestarts = 0
+    /** The last generation whose exit onCoreExit handled. */
+    @Volatile private var exitedGeneration = -1L
     @Volatile override var session: Tunnel.Session? = null; private set
     @Volatile override var chunkBytes: Long? = null; private set
     @Volatile override var wallet: Tunnel.Wallet? = null; private set
@@ -95,6 +99,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         if (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED) return
         wantConnected = true
         lastError = null
+        coreRestarts = 0
         set(Tunnel.State.CONNECTING, null)
         worker.execute {
             try {
@@ -198,8 +203,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         val blokli = props.getProperty("blokli_url") ?: error("gnosis.properties has no blokli_url")
         val network = props.getProperty("network") ?: error("gnosis.properties has no network")
         // A core stopped moments ago may still be shutting down: retry for a while.
-        // The last status is the stopped core's (the core restarts itself after a final
-        // connection error): forget it, so Connect waits for the new core's own "running".
+        // The last status is the stopped core's: forget it, so Connect waits for the new
+        // core's own "running".
         status = null
         var waited = 0
         while (true) {
@@ -211,7 +216,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             Thread.sleep(1_000)
             waited += 1_000
         }
-        coreRunning = true
+        // Not if the new core already exited (an immediate core_error handled meanwhile).
+        coreRunning = exitedGeneration != coreGeneration
         // The loops live as long as the process (the instance is a per-process singleton) and
         // idle while the core is stopped, so restarts never duplicate them.
         if (loopsStarted.compareAndSet(false, true)) {
@@ -293,7 +299,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     private fun connectLoopBody() {
         var waitedFor = ""
-        while (wantConnected && state == Tunnel.State.CONNECTING) {
+        // A core that exited ends the loop: onCoreExit queues its restart behind it on the worker.
+        while (wantConnected && state == Tunnel.State.CONNECTING && coreRunning) {
             val wanted = target ?: return
             val runMode = status?.let { GnosisProtocol.runMode(it) }
             val id = find(wanted)?.id
@@ -343,11 +350,45 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 }
                 // A late event of an earlier core (after a quick stop and restart) must not
                 // mark the current one as stopped.
-                "core_error" -> if (GnosisProtocol.ofCore(event, coreGeneration)) {
-                    coreRunning = false
-                    set(Tunnel.State.ERROR, event.optString("error"))
+                "core_error", "core_stopped" -> if (GnosisProtocol.ofCore(event, coreGeneration)) {
+                    onCoreExit(event.optLong("generation"), event.optString("error").takeIf { event.optString("type") == "core_error" })
                 }
-                "core_stopped" -> if (GnosisProtocol.ofCore(event, coreGeneration)) coreRunning = false
+            }
+        }
+    }
+
+    /**
+     * The current core, [generation], exited ([error] from core_error, null for core_stopped).
+     * Our own stopCore and disconnect clear [wantConnected] first, so that exit only goes idle.
+     * Otherwise the core quit by itself, e.g. after its final connection error or a Blokli move:
+     * like gvpndows' root, start a new one and connect it to the same target, keeping the tun
+     * (traffic stays blocked), a bounded number of times.
+     */
+    private fun onCoreExit(generation: Long, error: String?) {
+        exitedGeneration = generation   // first: startCoreOnce reads it before setting coreRunning
+        coreRunning = false
+        status = null; session = null; counters = null
+        val connecting = wantConnected && (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED)
+        val decision = CoreExit.decide(connecting, coreRestarts)
+        LogBuffer.log("gnosis: core exited${error?.let { " with error: $it" } ?: ""} -> ${decision.name.lowercase()}")
+        when (decision) {
+            CoreExit.IDLE -> if (error != null) set(Tunnel.State.ERROR, error)
+            CoreExit.GIVE_UP -> worker.execute {
+                if (wantConnected) giveUp(error ?: "The Gnosis VPN core stopped ${CoreExit.MAX_RESTARTS} times without a connection.")
+            }
+            CoreExit.RESTART -> {
+                coreRestarts++
+                if (state == Tunnel.State.CONNECTED) set(Tunnel.State.CONNECTING, "core stopped, restarting it")
+                // Behind a running connect loop, which ends now that coreRunning is false.
+                worker.execute {
+                    if (!wantConnected) return@execute   // the user disconnected meanwhile
+                    try {
+                        startCoreOnce(loadProps())   // waits out "core already running"
+                        connectWhenReady()
+                    } catch (e: Exception) {
+                        giveUp("The Gnosis VPN core could not be restarted: ${e.javaClass.simpleName}: ${e.message}")
+                    }
+                }
             }
         }
     }
@@ -372,6 +413,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             val current = tun
             if (current != null && params == tunParams) {
                 GnosisNative.tunReadyFor(generation, id, current.fd)?.let { error(it) }
+                coreRestarts = 0
                 set(Tunnel.State.CONNECTED, "reconnected in place, tun kept")
                 return
             }
@@ -382,6 +424,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             tunParams = params
             current?.let { runCatching { it.close() } }
             GnosisNative.tunReadyFor(generation, id, pfd.fd)?.let { error(it) }
+            coreRestarts = 0
             set(Tunnel.State.CONNECTED, "tun $address mtu $mtu")
         } catch (e: Exception) {
             LogBuffer.log("gnosis: tun setup failed: ${e.javaClass.simpleName}: ${e.message}")
