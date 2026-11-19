@@ -41,15 +41,14 @@ class TunnelService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        goForeground()
-        when (intent?.action) {
-            ACTION_DISCONNECT -> tunnel.disconnect()
-            ACTION_CONNECT -> tunnel.connect()
-            null -> {
-                // Restarted by the system after the process was killed while connected.
-                LogBuffer.log("service restarted by the system, reconnecting")
-                tunnel.connect()
-            }
+        goForeground()   // first: startForegroundService requires it even when we stop at once
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val owns = runTunnelCommand(intent?.action, tunnel, prefs.getBoolean(WANTED, false)) {
+            prefs.edit().putBoolean(WANTED, it).commit()   // read back by a restart after a kill
+        }
+        if (!owns) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf(startId)
         }
         return START_STICKY
     }
@@ -109,6 +108,8 @@ class TunnelService : Service() {
         const val NOTIFICATION_ID = 1
         const val ACTION_CONNECT = "org.gnosisvpn.stub.CONNECT"
         const val ACTION_DISCONNECT = "org.gnosisvpn.stub.DISCONNECT"
+        private const val PREFS = "tunnel_service"
+        private const val WANTED = "wanted"
 
         fun start(context: Context, action: String) {
             val i = Intent(context, TunnelService::class.java).setAction(action)
