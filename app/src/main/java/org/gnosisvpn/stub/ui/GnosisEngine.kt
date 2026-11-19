@@ -100,7 +100,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             // Funded when the same core moves on from preparing_safe. A shutdown, restart or backend switch
             // clears the request with the status: then only a later core past start-up shows the funds.
             val p = tn.phase
-            if (gate) { gate = false; pay = null; syncT = 0.0; fundedPending = true; if (p != null && p != "preparing_safe") fundedNote() }
+            if (gate) { gate = false; pay = null; syncT = 0.0; fundedPending = true; if (p != null && p !in STOPPED_OR_GATE) fundedNote() }
             else if (fundedPending && p != null && p !in BEFORE_FUNDED) fundedNote()
         }
         if (!gate && fail == null) {
@@ -414,8 +414,10 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     }
 
     companion object {
+        /** Run modes that are no progress past the gate: the gate itself, or a core stopping or stopped. */
+        private val STOPPED_OR_GATE = setOf("preparing_safe", "not_running", "shutdown", "restarting")
         /** Run modes a restarted core passes before it would reach the gate: they do not show it is funded. */
-        private val BEFORE_FUNDED = setOf("preparing_safe", "warmup", "not_running", "shutdown", "restarting")
+        private val BEFORE_FUNDED = STOPPED_OR_GATE + "warmup"
         /** Seconds a stop may take to reach the tunnel (an IPC round trip to TunnelService) before the tunnel's state counts again. */
         const val STOP_WAIT = 10.0
         /** "Edinburgh, UK" → GB, "FR" → FR; "" when the place has no two-letter country. */

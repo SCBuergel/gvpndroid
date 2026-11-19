@@ -30,6 +30,15 @@ class R4_5FundedNoteTest {
         assertEquals(0, funded())
     }
 
+    @Test fun aStoppingCoreIsNoPayment() {
+        for (mode in listOf("shutdown", "restarting", "not_running")) {
+            gate()
+            tn.fundingRequest = null; tn.phase = mode; tick()      // a last status of a core being stopped
+            assertFalse(e.gate)
+        }
+        assertEquals(0, funded())
+    }
+
     @Test fun theGateReopensAndTheRealFundingIsStillAnnounced() {
         gate()
         tn.fundingRequest = null; tn.phase = null; tick()
