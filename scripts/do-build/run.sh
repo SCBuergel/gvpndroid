@@ -6,7 +6,7 @@
 #        KEEP=1 scripts/do-build/run.sh   keep the droplet for iterating: scripts/do-build/rebuild.sh,
 #                                          then scripts/do-build/down.sh (the deadline stays armed)
 # Env: SIZE (c-32), REGION (ams3), PROFILE (fast | release), ABIS ("arm64-v8a x86_64"),
-#      CLIENT_REV (gnosis_vpn-client commit the patch is made for), DEADLINE_S (21600)
+#      CLIENT_REV (gnosis_vpn-client commit the patch is made for), DEADLINE_S (21600), TESTS (1)
 # The DigitalOcean token is read by droplet.py from $DO_TOKEN_FILE (default ~/do-api-token).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -14,6 +14,7 @@ cd "$(dirname "$0")/../.."
 REPO=$(pwd)
 SIZE=${SIZE:-c-32}; REGION=${REGION:-ams3}; PROFILE=${PROFILE:-fast}; ABIS=${ABIS:-arm64-v8a x86_64}
 CLIENT_REV=${CLIENT_REV:-8a0e3be}; DEADLINE_S=${DEADLINE_S:-21600}
+TESTS=${TESTS:-1}; case $TESTS in 0|1) ;; *) echo "TESTS must be 0 or 1" >&2; exit 2 ;; esac   # 0 skips the contract tests
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
 ST=$HOME/.local/state/gvpndroid-do; mkdir -p "$ST"; chmod 700 "$ST"
 NAME=gvpndroid-build-$(date +%s)
@@ -65,7 +66,7 @@ ssh_ "CLIENT_REV=$CLIENT_REV bash /root/upload/setup-remote.sh" | grep -E '^STEP
 step setup
 
 # Detached on the droplet so a dropped SSH connection does not kill the build.
-ssh_ "ABIS='$ABIS' PROFILE=$PROFILE nohup bash -c 'bash /root/upload/build-remote.sh; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
+ssh_ "ABIS='$ABIS' PROFILE=$PROFILE TESTS=$TESTS nohup bash -c 'bash /root/upload/build-remote.sh; echo JOB-EXIT \$?' > /root/build.log 2>&1 &"
 # Bounded: stop before the deadline deletes the droplet, or when it stops answering.
 await_job $(( t0 + DEADLINE_S - 300 ))
 ssh_ 'grep -E "^(error|STEP|JOB-EXIT|test )|could not compile|panicked" /root/build.log'
