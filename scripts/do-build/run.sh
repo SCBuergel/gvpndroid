@@ -17,6 +17,11 @@ CLIENT_REV=${CLIENT_REV:-8a0e3be}; DEADLINE_S=${DEADLINE_S:-21600}
 TESTS=${TESTS:-1}; case $TESTS in 0|1) ;; *) echo "TESTS must be 0 or 1" >&2; exit 2 ;; esac   # 0 skips the contract tests
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
 ST=$HOME/.local/state/gvpndroid-do; mkdir -p "$ST"; chmod 700 "$ST"
+# One kept droplet at a time: rebuild.sh and down.sh know only $ST/current. Checked before any create.
+if [ "${KEEP:-0}" = 1 ] && [ -e "$ST/current" ]; then
+    echo "a droplet is already kept ($ST/current): use scripts/do-build/rebuild.sh, or scripts/do-build/down.sh first" >&2
+    exit 1
+fi
 NAME=gvpndroid-build-$(date +%s)
 KNOWN_HOSTS=$ST/$NAME.known_hosts   # fresh per run: droplet IPs get reused
 [ -f "$ST/id_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -C gvpndroid-build -f "$ST/id_ed25519"
@@ -26,9 +31,12 @@ id=""
 teardown() {
     rc=$?
     if [ -n "$id" ] && [ "${KEEP:-0}" = 1 ] && [ "$rc" = 0 ]; then
-        printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" > "$ST/current"
-        echo "KEPT droplet $id at $ip (deadline $NAME armed); iterate with scripts/do-build/rebuild.sh, end with scripts/do-build/down.sh"
-        exit 0
+        # noclobber: a droplet kept meanwhile by another run is never overwritten; this one is deleted.
+        if (set -C; printf 'id=%s\nip=%s\nname=%s\nknown_hosts=%s\n' "$id" "$ip" "$NAME" "$KNOWN_HOSTS" > "$ST/current") 2>/dev/null; then
+            echo "KEPT droplet $id at $ip (deadline $NAME armed); iterate with scripts/do-build/rebuild.sh, end with scripts/do-build/down.sh"
+            exit 0
+        fi
+        echo "another droplet was kept meanwhile ($ST/current); deleting this one" >&2
     fi
     if [ -n "$id" ]; then
         if python3 -I scripts/do-build/droplet.py delete "$id"; then
