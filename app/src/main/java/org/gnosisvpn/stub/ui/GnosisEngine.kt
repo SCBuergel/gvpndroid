@@ -104,8 +104,11 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             else if (fundedPending && p != null && p !in BEFORE_FUNDED) fundedNote()
         }
         if (!gate && fail == null) {
+            // A core restarting under a wanted or live connection is a reconnect, not a start-up:
+            // the user keeps the home screen (and Cancel/Disconnect) and the page they had open.
+            val connection = conn != Conn.IDLE || tn.state == Tunnel.State.CONNECTING || tn.state == Tunnel.State.CONNECTED
             if (tn.phase == "running") { if (syncT != null) endSync() }
-            else if (syncT == null) { syncT = 0.0; home(); sheet = null }
+            else if (syncT == null && !connection) { syncT = 0.0; home(); sheet = null }
         }
 
         syncExits(tn)
