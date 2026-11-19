@@ -30,14 +30,20 @@ def show(m, priv):
     t = time.strftime("%H:%M:%S", time.localtime(m["time"]))
     body = m.get("message", "")
     att = m.get("attachment") or {}
+    note = None
     if att.get("url"):  # a backlog sent as one attachment (ntfy keeps it 3 hours)
-        try:
-            with urllib.request.urlopen(att["url"], timeout=60) as r:
-                body = r.read().decode("ascii", "replace").strip()
-        except Exception as ex:
-            body = f"(attachment not readable: {type(ex).__name__}, it may have expired)"
+        url = att["url"]
+        # The topic is in every debug APK, so anyone can post here: fetch only ntfy's own files.
+        if not url.startswith("https://ntfy.sh/file/"):
+            note = f"(attachment link not from ntfy.sh, not fetched: {url[:60]})"
+        else:
+            try:
+                with urllib.request.urlopen(url, timeout=60) as r:
+                    body = r.read(3_000_000).decode("ascii", "replace").strip()
+            except Exception as ex:
+                note = f"(attachment not readable: {type(ex).__name__}; it may have expired)"
     try:
-        text = unseal(body, priv) if body.startswith(TAG.decode() + " ") else "(not a sealed log part)"
+        text = note or (unseal(body, priv) if body.startswith(TAG.decode() + " ") else "(not a sealed log part)")
     except Exception as ex:  # a part that is not ours or is damaged: say so, keep going
         text = f"(cannot open: {type(ex).__name__})"
     print(f"=== {t} {m.get('title', '')}\n{text}", flush=True)
