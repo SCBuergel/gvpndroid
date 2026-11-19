@@ -28,6 +28,8 @@ push_private() { # $1 local file, $2 path relative to no_backup
     $A shell rm -f /data/local/tmp/gvpn-xfer
 }
 
+ipaddr() { tr -d '\r' | tail -1 | grep -E '^[0-9a-fA-F.:]+$' || true; }   # last line if an IP literal, else empty
+
 props() {
     push_private "$1/gnosis.toml" gnosis.toml
     push_private "$1/gnosis.properties" gnosis.properties
@@ -72,12 +74,13 @@ print((int(m[1])+int(m[3]))//2, (int(m[2])+int(m[4]))//2) if m else print("360 1
 log) $A logcat -d -s GnosisVpnStub:I gnosisvpn:I AndroidRuntime:E DEBUG:F | tail -n "${2:-80}" ;;
 e2e)
     fails=0
+    # check/wait_for eval their argument: quote it with '...' so values are expanded there as data.
     check() { if eval "$2"; then echo "PASS: $1"; else echo "FAIL: $1"; fails=$((fails + 1)); fi; }
     wait_for() { n=$1; shift; while [ "$n" -gt 0 ]; do eval "$1" && return 0; sleep 3; n=$((n - 3)); done; return 1; }
     applog() { timeout 20 $A logcat -d -s GnosisVpnStub:I 2>/dev/null; }
     on_tun() { timeout 10 $A shell ip route get 1.1.1.1 2>/dev/null | grep -q tun0; }
-    pubip() { timeout 60 $A shell 'printf "GET / HTTP/1.0\r\nHost: ifconfig.me\r\nUser-Agent: curl\r\n\r\n" | nc -w 15 -q 30 -W 20 ifconfig.me 80' 2>/dev/null | tail -1 | tr -d '\r'; }
-    host_ip=$(curl -sS -m 15 https://ifconfig.me || true)
+    pubip() { timeout 60 $A shell 'printf "GET / HTTP/1.0\r\nHost: ifconfig.me\r\nUser-Agent: curl\r\n\r\n" | nc -w 15 -q 30 -W 20 ifconfig.me 80' 2>/dev/null | ipaddr; }
+    host_ip=$(curl -sS -m 15 https://ifconfig.me | ipaddr)
     "$0" restart
     check "app runs the gnosis backend" "wait_for 60 'applog | grep -q \"backend: gnosis\"'"
     check "core reaches run mode running" "wait_for 240 'applog | grep -q \"run mode running\"'"
@@ -87,11 +90,11 @@ e2e)
     check "tunnel up (default route via tun0)" "wait_for 240 on_tun"
     ip=""; for _ in 1 2 3 4 5 6; do ip=$(pubip); [ -n "$ip" ] && break; sleep 10; done   # PIX payment hold
     echo "info: public IP through the tunnel: ${ip:-none}; this machine: $host_ip"
-    check "public IP through the tunnel differs from this machine's" "[ -n \"$ip\" ] && [ \"$ip\" != \"$host_ip\" ]"
-    rx() { timeout 10 $A shell cat /proc/net/dev | awk '/tun0/{print $2}'; }
-    b=$(rx); n=$(timeout 150 $A shell "printf 'GET /debian/dists/stable/main/Contents-all.gz HTTP/1.0\r\nHost: deb.debian.org\r\n\r\n' | nc -w 30 -q 120 -W 30 deb.debian.org 80 | head -c 1000000 | wc -c" 2>/dev/null | tr -d '\r ')
-    a=$(rx); echo "info: downloaded ${n:-0} bytes, tun0 rx $(( ${a:-0} - ${b:-0} )) bytes"
-    check "1 MB downloaded through tun0" "[ \"${n:-0}\" -ge 1000000 ] && [ $(( ${a:-0} - ${b:-0} )) -ge 1000000 ]"
+    check "public IP through the tunnel differs from this machine's" '[ -n "$ip" ] && [ "$ip" != "$host_ip" ]'
+    rx() { timeout 10 $A shell cat /proc/net/dev | awk '/tun0/{print $2}' | tr -cd '0-9'; }
+    b=$(rx); n=$(timeout 150 $A shell "printf 'GET /debian/dists/stable/main/Contents-all.gz HTTP/1.0\r\nHost: deb.debian.org\r\n\r\n' | nc -w 30 -q 120 -W 30 deb.debian.org 80 | head -c 1000000 | wc -c" 2>/dev/null | tr -cd '0-9')
+    a=$(rx); got=$(( ${a:-0} - ${b:-0} )); echo "info: downloaded ${n:-0} bytes, tun0 rx $got bytes"
+    check "1 MB downloaded through tun0" '[ "${n:-0}" -ge 1000000 ] && [ "$got" -ge 1000000 ]'
     "$0" connect   # the button reads Disconnect now
     check "tunnel down after disconnect" "wait_for 60 '! on_tun'"
     [ "$fails" = 0 ] && echo "E2E PASS" || { echo "E2E FAIL ($fails)"; exit 1; }
