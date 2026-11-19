@@ -458,13 +458,20 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 TunSlot.Answer.BUILD_NEW -> {}
             }
             val service = GnosisVpnService.obtain(context)
-            val pfd = service.establish(address, mtu, dns)
-                ?: error("establish() returned null (VPN permission missing?)")
+            val pfd = service.establish(address, mtu, dns) ?: throw NoVpnPermission()
             if (!tuns.install(pfd, params) { hand(it, "tun $address mtu $mtu") }) refuse()
         } catch (e: Exception) {
             LogBuffer.log("gnosis: tun setup failed: ${e.javaClass.simpleName}: ${e.message}")
             GnosisNative.tunReadyFor(generation, id, -1)
-            if (wantConnected) set(Tunnel.State.ERROR, "tun setup failed")
+            if (!wantConnected) return
+            if (TunFailure.of(e).keepsConnecting) {
+                // Not ERROR: the core retries in place, and its final exit goes through onCoreExit.
+                // Under the intent lock, so a disconnect since then keeps its DISCONNECTING.
+                synchronized(intent) { if (wantConnected) set(Tunnel.State.CONNECTING, "tun setup failed, the core retries") }
+            } else {
+                giveUp("Android did not allow the VPN. Open the app and allow the VPN connection.")
+                worker.execute { disconnectCore() }   // end the core's attempt too (off this event thread)
+            }
         }
     }
 
