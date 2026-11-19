@@ -4,6 +4,7 @@
   droplet.py create NAME SIZE REGION PUBKEY_FILE   -> prints the droplet id, waits for an IPv4
   droplet.py ip ID
   droplet.py delete ID     idempotent: a droplet already gone counts as success; verifies 404
+  droplet.py find NAME     prints the id of the droplet named exactly NAME, or nothing
   droplet.py list          droplets on the account
 
 The API token is read from $DO_TOKEN_FILE (default ~/do-api-token) and never printed.
@@ -125,6 +126,10 @@ if __name__ == "__main__":
         print(ipv4(js["droplet"]) if st == 200 else f"status {st}")
     elif cmd == "delete" and len(sys.argv) == 3:
         delete(sys.argv[2])
+    elif cmd == "find" and len(sys.argv) == 3:
+        did = find_by_name(sys.argv[2])
+        if did is not None:
+            print(did)
     elif cmd == "list":
         st, js = call("GET", "/droplets?per_page=200")
         for d in js.get("droplets", []):

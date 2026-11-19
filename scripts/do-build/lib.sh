@@ -18,6 +18,22 @@ await_id() {
     echo "$id"
 }
 
+# recover_id FILE PID NAME: for teardown when no id is known but the create (PID, writing FILE)
+# was started, e.g. a Ctrl-C during it: the create ignores INT, so wait for the id it prints and
+# stop it; if it died without one (TERM to the group), look the droplet up by NAME. Prints the id,
+# or nothing (and says why on stderr).
+recover_id() {
+    local id
+    id=$(await_id "$1" "$2")
+    kill "$2" 2>/dev/null || true   # done with it: it may still wait for the droplet to be active
+    if [ -z "$id" ]; then
+        if id=$(python3 -I scripts/do-build/droplet.py find "$3"); then
+            [ -n "$id" ] || echo "no droplet $3 was created" >&2
+        fi
+    fi
+    echo "$id"
+}
+
 # await_job LIMIT: wait until /root/build.log on the droplet (via the caller's ssh_) has its JOB-EXIT
 # line. Exits the script with 1 once LIMIT (epoch seconds) has passed or after 8 failed ssh
 # connections in a row, so teardown deletes the droplet. POLL_S (15) is the poll interval.

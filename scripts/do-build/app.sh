@@ -24,9 +24,12 @@ W=$ST/$NAME; mkdir -p "$W"; chmod 700 "$W"     # under /home: /tmp is a small tm
 [ -f "$ST/id_ed25519" ] || ssh-keygen -q -t ed25519 -N '' -C gvpndroid-build -f "$ST/id_ed25519"
 t0=$(date +%s); t=$t0
 step() { n=$(date +%s); echo "STEP $1 $((n - t))"; t=$n; }
-id=""
+id=""; cpid=""
 teardown() {
     rc=$?
+    trap '' INT TERM HUP   # a second Ctrl-C must not cut the recovery or the delete short
+    # Interrupted while the create ran: its droplet may exist without an id here.
+    if [ -z "$id" ] && [ -n "$cpid" ]; then id=$(recover_id "$W/create" "$cpid" "$NAME"); fi
     if [ -n "$id" ]; then
         if python3 -I scripts/do-build/droplet.py delete "$id"; then
             python3 "$DEADLINE" cancel "$NAME" >/dev/null 2>&1 || true
@@ -44,7 +47,7 @@ trap 'exit 130' INT TERM HUP
 python3 -I scripts/do-build/droplet.py create "$NAME" "$SIZE" "$REGION" "$ST/id_ed25519.pub" > "$W/create" &
 cpid=$!
 id=$(await_id "$W/create" $cpid)   # as long as the create runs: a late id still gets a deadline
-[ -n "$id" ] || { wait $cpid || true; echo "droplet creation failed" >&2; exit 1; }
+[ -n "$id" ] || { wait $cpid || true; cpid=""; echo "droplet creation failed" >&2; exit 1; }   # create looked it up by name already
 python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- env "DO_TOKEN_FILE=$DO_TOKEN_FILE" python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
 wait $cpid
 ip=$(sed -n 2p "$W/create" | cut -d' ' -f1)
