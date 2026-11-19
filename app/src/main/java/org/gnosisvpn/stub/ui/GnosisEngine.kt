@@ -52,6 +52,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     private var sessionStart: Tunnel.Stats? = null
     /** The wallet can be shown as data (the backend has a fixed price). */
     private var dataKnown = false
+    /** The gate left: "Payment received" once the core reports it moved past preparing_safe, not on a vanished status. */
+    private var fundedPending = false
 
     override val chunk: Double get() = (tunnel().chunkBytes ?: session?.chunkBytes)?.let { it / 1e6 } ?: COST
 
@@ -61,6 +63,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         balance = 0.0; added = 0.0; popover = false; warm = false; autoRenew = true; arPast4 = true; free = false
         syncT = 0.0
         lastIds = ""; lastState = null; wallet = null; session = null; lastBought = null; dataKnown = false; stopping = false; pendingExit = null
+        fundedPending = false
         load()
     }
 
@@ -90,11 +93,15 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         // funding gate: the node waits for its first funds
         val fr = tn.fundingRequest
         if (fr != null) {
-            if (!gate) { gate = true; home(); sheet = null }
+            // A new gate episode: its funding is announced once more.
+            if (!gate) { gate = true; fundedPending = false; fired.remove("n8:gate"); home(); sheet = null }
             fundAddress = fr.address; need = fr.need; syncT = null
-        } else if (gate) {
-            gate = false; pay = null; syncT = 0.0
-            fire("n8:gate", Note("n8", "Payment received", "Your node is funded. Gnosis VPN is getting ready.", listOf("Close" to "nclose"), code = "N8"))
+        } else {
+            // Funded when the same core moves on from preparing_safe. A shutdown, restart or backend switch
+            // clears the request with the status: then only a later core past start-up shows the funds.
+            val p = tn.phase
+            if (gate) { gate = false; pay = null; syncT = 0.0; fundedPending = true; if (p != null && p != "preparing_safe") fundedNote() }
+            else if (fundedPending && p != null && p !in BEFORE_FUNDED) fundedNote()
         }
         if (!gate && fail == null) {
             if (tn.phase == "running") { if (syncT != null) endSync() }
@@ -105,6 +112,11 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         syncWallet(tn)
         syncSession(tn, dt)
         syncRates(tn)
+    }
+
+    private fun fundedNote() {
+        fundedPending = false
+        fire("n8:gate", Note("n8", "Payment received", "Your node is funded. Gnosis VPN is getting ready.", listOf("Close" to "nclose"), code = "N8"))
     }
 
     private fun failureCode(tn: Tunnel) = "GVPN-" + (tn.phase ?: "core").uppercase(Locale.ROOT).replace('_', '-')
@@ -402,6 +414,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     }
 
     companion object {
+        /** Run modes a restarted core passes before it would reach the gate: they do not show it is funded. */
+        private val BEFORE_FUNDED = setOf("preparing_safe", "warmup", "not_running", "shutdown", "restarting")
         /** Seconds a stop may take to reach the tunnel (an IPC round trip to TunnelService) before the tunnel's state counts again. */
         const val STOP_WAIT = 10.0
         /** "Edinburgh, UK" → GB, "FR" → FR; "" when the place has no two-letter country. */
