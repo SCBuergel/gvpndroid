@@ -39,6 +39,8 @@ class GnosisEmulatorEvalTest {
         assertTrue(injected, injected.startsWith("PASS"))
         assertTrue(sh(ipCheck, "ip" to "", "host_ip" to "5.6.7.8").startsWith("FAIL"))
         assertTrue(sh(ipCheck, "ip" to "5.6.7.8", "host_ip" to "5.6.7.8").startsWith("FAIL"))
+        // this machine's lookup failed: nothing was compared, so no PASS (R7-7)
+        assertTrue(sh(ipCheck, "ip" to "1.2.3.4", "host_ip" to "").startsWith("FAIL"))
     }
 
     @Test

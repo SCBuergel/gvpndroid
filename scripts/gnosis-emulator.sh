@@ -89,8 +89,9 @@ e2e)
     "$0" connect
     check "tunnel up (default route via tun0)" "wait_for 240 on_tun"
     ip=""; for _ in 1 2 3 4 5 6; do ip=$(pubip); [ -n "$ip" ] && break; sleep 10; done   # PIX payment hold
-    echo "info: public IP through the tunnel: ${ip:-none}; this machine: $host_ip"
-    check "public IP through the tunnel differs from this machine's" '[ -n "$ip" ] && [ "$ip" != "$host_ip" ]'
+    echo "info: public IP through the tunnel: ${ip:-none}; this machine: ${host_ip:-unknown (lookup failed)}"
+    # Both must be known: an empty host_ip would let any reply, even a leak, pass.
+    check "public IP through the tunnel differs from this machine's" '[ -n "$ip" ] && [ -n "$host_ip" ] && [ "$ip" != "$host_ip" ]'
     rx() { timeout 10 $A shell cat /proc/net/dev | awk '/tun0/{print $2}' | tr -cd '0-9'; }
     b=$(rx); n=$(timeout 150 $A shell "printf 'GET /debian/dists/stable/main/Contents-all.gz HTTP/1.0\r\nHost: deb.debian.org\r\n\r\n' | nc -w 30 -q 120 -W 30 deb.debian.org 80 | head -c 1000000 | wc -c" 2>/dev/null | tr -cd '0-9')
     a=$(rx); got=$(( ${a:-0} - ${b:-0} )); echo "info: downloaded ${n:-0} bytes, tun0 rx $got bytes"
