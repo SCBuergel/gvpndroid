@@ -125,15 +125,16 @@ object GnosisProtocol {
     fun coreGaveUp(wantConnected: Boolean, connectLoop: Boolean, before: String, now: String, coreTarget: String?): Boolean =
         wantConnected && !connectLoop && now == "disconnected" && before in setOf("connecting", "reconnecting") && coreTarget.isNullOrEmpty()
 
-    /** Why the core refused a connect, in words, or null when it took it (connecting, waiting, already connected). */
-    /** The JNI bridge's reply to a command before the core runs (lib.rs). */
-    const val CORE_NOT_RUNNING = "core is not running"
-
+    /**
+     * Why the core refused a connect, in words, or null when it took it (connecting, waiting,
+     * already connected) or never got it: the bridge marks those errors "transient" (a core not
+     * up yet, exiting, or too slow; tests/protocol.json bridge_errors), and the connect loop
+     * tries again or ends when the core exits, so its restart decides.
+     */
     fun connectRefusal(reply: String?): String? {
         if (reply.isNullOrEmpty()) return "The Gnosis VPN core did not answer."
         val o = runCatching { JSONObject(reply) }.getOrNull() ?: return null
-        // The bridge says this while a (re)started core is not up yet: wait, do not give up.
-        str(o, "error")?.let { return it.takeIf { e -> e != CORE_NOT_RUNNING } }
+        str(o, "error")?.let { return it.takeUnless { o.optBoolean("transient") } }
         val d = statusData(reply) ?: o
         return if (d.optString("type") == "unable_to_connect") whyNot(d.optJSONObject("route_health")) else null
     }

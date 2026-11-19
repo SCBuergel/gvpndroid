@@ -289,5 +289,10 @@
     "gvpn-ger-1-j9os"
    ]
   }
+ },
+ "bridge_errors": {
+  "_comment": "Replies of GnosisNative.command without a core Response. transient: the core never took the command (not running, exiting, too slow): retry; otherwise a refusal.",
+  "transient": "{\"error\":\"core dropped the command\",\"transient\":true}",
+  "refused": "{\"error\":\"command is null or not UTF-8\",\"transient\":false}"
  }
 }

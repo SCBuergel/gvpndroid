@@ -142,7 +142,7 @@ class GnosisLiveDataTest {
             GnosisProtocol.connectRefusal("""{"type":"connect","data":{"type":"unable_to_connect","destination":{},"route_health":{"type":"not_routable"}}}"""))
         assertEquals("worker offline", GnosisProtocol.connectRefusal("""{"error":"worker offline"}"""))
         // a core that is (re)starting is waited for, not taken as a refusal
-        assertNull(GnosisProtocol.connectRefusal("""{"error":"core is not running"}"""))
+        assertNull(GnosisProtocol.connectRefusal("""{"error":"core is not running","transient":true}"""))
         assertEquals("The Gnosis VPN core did not answer.", GnosisProtocol.connectRefusal(null))
     }
 

@@ -145,8 +145,9 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_startCore(
 
 /// `GnosisNative.command(json: String): String` — sends a `WorkerCommand` as JSON (serde tag
 /// "type", snake_case: `{"type":"status"}`, `{"type":"connect","destination":"<id>"}`) and returns
-/// the core's `Response` as JSON, or `{"error":"..."}`. Blocks up to 60 s: never call it on the
-/// main thread. tests/protocol.json pins the format on both sides.
+/// the core's `Response` as JSON, or `{"error":"...","transient":bool}` (see [CommandError]).
+/// Blocks up to 60 s: never call it on the main thread. tests/protocol.json pins the format on
+/// both sides.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_command(
     env: *mut JNIEnv,
@@ -154,33 +155,55 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_command(
     json_cmd: jstring,
 ) -> jstring {
     let reply = match get_string(env, json_cmd) {
-        Some(text) => command(&text).unwrap_or_else(|e| json!({ "error": e }).to_string()),
-        None => json!({ "error": "command is null or not UTF-8" }).to_string(),
+        Some(text) => command(&text).unwrap_or_else(|e| e.reply()),
+        None => CommandError::refused("command is null or not UTF-8").reply(),
     };
     new_string(env, &reply)
 }
 
-fn command(text: &str) -> Result<String, String> {
+/// A command that got no `Response`. `transient`: the core never took it (not running yet,
+/// exiting, or too slow), so the app tries again rather than reading it as the core's refusal.
+#[derive(Debug)]
+struct CommandError {
+    message: String,
+    transient: bool,
+}
+
+impl CommandError {
+    fn transient(message: impl Into<String>) -> Self {
+        Self { message: message.into(), transient: true }
+    }
+    fn refused(message: impl Into<String>) -> Self {
+        Self { message: message.into(), transient: false }
+    }
+    fn reply(&self) -> String {
+        json!({ "error": self.message, "transient": self.transient }).to_string()
+    }
+}
+
+fn command(text: &str) -> Result<String, CommandError> {
     command_within(text, COMMAND_TIMEOUT)
 }
 
-fn command_within(text: &str, timeout: Duration) -> Result<String, String> {
+fn command_within(text: &str, timeout: Duration) -> Result<String, CommandError> {
     // Never echo the command: some carry secrets (FundingTool), and the reply ends up in logs.
-    let cmd: WorkerCommand = serde_json::from_str(text)
-        .map_err(|e| format!("bad command ({:?} error at line {} column {})", e.classify(), e.line(), e.column()))?;
-    let sender = to_core().ok_or("core is not running")?;
+    let cmd: WorkerCommand = serde_json::from_str(text).map_err(|e| {
+        CommandError::refused(format!("bad command ({:?} error at line {} column {})", e.classify(), e.line(), e.column()))
+    })?;
+    let sender = to_core().ok_or_else(|| CommandError::transient("core is not running"))?;
     runtime().block_on(async move {
         let (resp, rx) = oneshot::channel();
         // One deadline for the send and the reply: a backlogged core channel must not block the
         // caller for good (a send still waiting at the deadline is withdrawn).
         let exchange = async {
-            sender.send(WorkerToCore::WorkerCommand { cmd, resp }).await.map_err(|_| "core stopped".to_string())?;
-            rx.await.map_err(|_| "core dropped the command".to_string())
+            // An exiting core: its channel is closed, or it ends with the command still queued.
+            sender.send(WorkerToCore::WorkerCommand { cmd, resp }).await.map_err(|_| CommandError::transient("core stopped"))?;
+            rx.await.map_err(|_| CommandError::transient("core dropped the command"))
         };
         let response = tokio::time::timeout(timeout, exchange)
             .await
-            .map_err(|_| format!("core did not answer within {} s", timeout.as_secs()))??;
-        serde_json::to_string(&response).map_err(|e| format!("response not serializable: {e}"))
+            .map_err(|_| CommandError::transient(format!("core did not answer within {} s", timeout.as_secs())))??;
+        serde_json::to_string(&response).map_err(|e| CommandError::refused(format!("response not serializable: {e}")))
     })
 }
 
@@ -572,7 +595,19 @@ mod tests {
         *super::TO_CORE.lock().unwrap() = Some((7, sender));
         let err = super::command_within(r#"{"type":"status"}"#, std::time::Duration::from_millis(100)).unwrap_err();
         super::TO_CORE.lock().unwrap().take();
-        assert!(err.contains("did not answer"), "{err}");
+        assert!(err.message.contains("did not answer"), "{err:?}");
+        assert!(err.transient, "a slow core is retried, not a refusal");
+    }
+
+    /// The error replies have the shapes the app parses (tests/protocol.json "bridge_errors").
+    #[test]
+    fn error_replies_match_the_contract() {
+        let f = fixture();
+        let parse = |s: String| serde_json::from_str::<Value>(&s).unwrap();
+        let exiting = super::CommandError::transient("core dropped the command").reply();
+        assert_eq!(parse(exiting), parse(f["bridge_errors"]["transient"].as_str().unwrap().to_string()));
+        let refused = super::CommandError::refused("command is null or not UTF-8").reply();
+        assert_eq!(parse(refused), parse(f["bridge_errors"]["refused"].as_str().unwrap().to_string()));
     }
 
     /// Shutdown waits for room in a full core channel instead of being dropped.
@@ -639,6 +674,7 @@ mod tests {
     fn bad_command_error_does_not_echo_the_command() {
         let secret = r#"{"type":"funding_tool","secret":"TOP-SECRET-CODE","oops":"#;
         let err = super::command(secret).unwrap_err();
-        assert!(!err.contains("TOP-SECRET-CODE"), "{err}");
+        assert!(!err.message.contains("TOP-SECRET-CODE"), "{err:?}");
+        assert!(!err.transient, "a bad command is not retried");
     }
 }
