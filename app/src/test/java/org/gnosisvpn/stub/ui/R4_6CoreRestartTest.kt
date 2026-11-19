@@ -11,7 +11,7 @@ import org.gnosisvpn.stub.Tunnel as T
 class R4_6CoreRestartTest {
     private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9, firstRelays = 2))
     private val session = T.Session("0xa", 1, step = 9, steps = 10, bytesLeft = 400_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED)
-    private class Hooks : EngineHooks { var stops = 0; override fun disconnectVpn() { stops++ } }
+    private class Hooks : EngineHooks { var stops = 0; var connects = 0; override fun disconnectVpn() { stops++ }; override fun connectVpn() { connects++ } }
     private fun GnosisEngine.tick(n: Int = 1) = repeat(n) { t += 1; step(1.0) }
 
     @Test fun aRestartWhileConnectedIsAReconnectNotAStartUp() {
@@ -27,6 +27,19 @@ class R4_6CoreRestartTest {
         assertNotEquals(Conn.IDLE, e.conn)
         e.act("cancel")
         assertEquals("the stop did not reach the tunnel", 1, h.stops)
+        tn.state = T.State.DISCONNECTED; e.tick(3)   // the stop arrived; no core started yet
+        assertNull("stopped reconnect lands on the sync screen", e.syncT)
+        assertEquals(Conn.IDLE, e.conn)
+        tn.phase = "running"; tn.locations = listOf(loc("0xa")); e.tick(3)   // the restarted core runs
+        assertEquals("the stop was undone by the start-up auto-connect", 0, h.connects)
+        assertEquals(Conn.IDLE, e.conn)
+    }
+
+    @Test fun aUiStartedDuringARestartUnderAConnectionShowsHomeNotSync() {
+        val tn = FakeTunnel(); val h = Hooks(); val e = GnosisEngine({ tn }); e.hooks = h
+        tn.state = T.State.CONNECTING; e.start(); e.tick()   // reset() starts in sync; the tun is held
+        assertNull(e.syncT)
+        assertNotEquals(Conn.IDLE, e.conn)
     }
 
     @Test fun aCoreStartWithoutAConnectionStillShowsTheSyncScreen() {

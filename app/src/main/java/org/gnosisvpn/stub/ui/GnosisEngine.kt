@@ -61,7 +61,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         super.reset()
         exits = mutableListOf(); loc = ""; lockdown = false; alwaysOn = false
         balance = 0.0; added = 0.0; popover = false; warm = false; autoRenew = true; arPast4 = true; free = false
-        syncT = 0.0
+        syncT = 0.0; restarting = false
         lastIds = ""; lastState = null; wallet = null; session = null; lastBought = null; dataKnown = false; stopping = false; pendingExit = null
         fundedPending = false
         load()
@@ -82,6 +82,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             ?.putString("icons", icons)?.putBoolean("simple", simple)?.putBoolean("arIntro", arIntro)?.putBoolean("qsTile", qsTile)
             ?.putString("pickMode", mode)?.apply()
     }
+
+    /** The core went away under a connection; until it runs again, no start-up sync screen. */
+    private var restarting = false
 
     override fun step(dt: Double) {
         val tn = tunnel()
@@ -104,11 +107,13 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             else if (fundedPending && p != null && p !in BEFORE_FUNDED) fundedNote()
         }
         if (!gate && fail == null) {
-            // A core restarting under a wanted or live connection is a reconnect, not a start-up:
-            // the user keeps the home screen (and Cancel/Disconnect) and the page they had open.
+            // A core (re)starting under a wanted or live connection is a reconnect, not a start-up:
+            // the user keeps the home screen with Cancel/Disconnect and the page they had open, and
+            // after a stop stays there, idle (no sync screen, so no auto-connect undoes the stop).
             val connection = conn != Conn.IDLE || tn.state == Tunnel.State.CONNECTING || tn.state == Tunnel.State.CONNECTED
-            if (tn.phase == "running") { if (syncT != null) endSync() }
-            else if (syncT == null && !connection) { syncT = 0.0; home(); sheet = null }
+            if (tn.phase == "running") { restarting = false; if (syncT != null) endSync() }
+            else if (connection) { restarting = true; syncT = null }
+            else if (syncT == null && !restarting) { syncT = 0.0; home(); sheet = null }
         }
 
         syncExits(tn)
