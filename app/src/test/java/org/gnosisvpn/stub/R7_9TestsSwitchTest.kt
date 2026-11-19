@@ -8,7 +8,10 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** TESTS reaches build-remote.sh from rebuild.sh, and only 0 or 1 is accepted (R7-9). */
+/**
+ * TESTS reaches build-remote.sh from run.sh and rebuild.sh, and only 0 or 1 is accepted (R7-9).
+ * Fakes stand in for ssh, scp, ssh-keygen, droplet.py and the deadline: nothing leaves the machine.
+ */
 class R7_9TestsSwitchTest {
     @get:Rule val tmp = TemporaryFolder()
 
@@ -17,17 +20,24 @@ class R7_9TestsSwitchTest {
         val root = tmp.newFolder("repo")
         File(root, "scripts/do-build").mkdirs()
         for (f in listOf(script, "lib.sh")) File("../scripts/do-build/$f").copyTo(File(root, "scripts/do-build/$f"))
+        // run.sh's droplet: created at once (id, then "ip price"), deleted at once
+        File(root, "scripts/do-build/droplet.py").writeText("import sys\nif sys.argv[1] == 'create': print('123', flush=True); print('192.0.2.1 0.1')\n")
+        val deadline = File(tmp.root, "deadline.py").apply { writeText("") }
         val home = tmp.newFolder("home")
         File(home, ".local/state/gvpndroid-do").apply { mkdirs() }.resolve("current")
             .writeText("ip=192.0.2.1\nknown_hosts=/dev/null\n")
         val log = File(tmp.root, "ssh.log")
         val bin = tmp.newFolder("bin")
-        File(bin, "ssh").writeText("#!/bin/bash\nprintf '%s\\n' \"\${@: -1}\" >> \"\$SSH_LOG\"\n")
+        // Logs each remote command; answers run.sh's setup and job-status polls.
+        File(bin, "ssh").writeText("#!/bin/bash\nc=\"\${@: -1}\"; printf '%s\\n' \"\$c\" >> \"\$SSH_LOG\"\n" +
+            "case \"\$c\" in *setup-remote.sh*) echo SETUP-DONE ;; *'then echo 1; else echo 0'*) echo 1 ;; esac\n")
+        File(bin, "ssh-keygen").writeText("#!/bin/bash\nf=\"\${@: -1}\"; : > \"\$f\"; : > \"\$f.pub\"\n")
         File(bin, "scp").writeText("#!/bin/bash\nd=\"\${@: -1}\"\ncase \"\$d\" in root@*) ;; *) echo new > \"\$d\" ;; esac\n")
         bin.listFiles()!!.forEach { it.setExecutable(true) }
         val p = ProcessBuilder("bash", "scripts/do-build/$script").directory(root).redirectErrorStream(true)
         p.environment().apply {
             put("HOME", home.path); put("PATH", "${bin.path}:${get("PATH")}"); put("SSH_LOG", log.path); put("ABIS", "x86_64")
+            put("DEADLINE", deadline.path); remove("KEEP"); remove("PROFILE")
             if (tests != null) put("TESTS", tests) else remove("TESTS")
         }
         val proc = p.start()
@@ -43,6 +53,16 @@ class R7_9TestsSwitchTest {
         val (exit0, _, remote0) = run("rebuild.sh", "0")
         assertEquals(0, exit0)
         assertTrue(remote0, remote0.contains("TESTS=0 bash /root/upload/build-remote.sh"))
+    }
+
+    @Test fun runForwardsTestsToTheDetachedBuild() {
+        for ((tests, want) in listOf(null to "1", "0" to "0")) {
+            tmp.root.listFiles()!!.forEach { it.deleteRecursively() }
+            val (exit, out, remote) = run("run.sh", tests)
+            assertEquals(out, 0, exit)
+            val build = remote.lines().single { "build-remote.sh" in it }
+            assertTrue(build, build.contains("PROFILE=fast TESTS=$want nohup"))
+        }
     }
 
     @Test fun anythingButZeroOrOneIsRefusedBeforeReachingTheDroplet() {
