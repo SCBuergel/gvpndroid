@@ -36,6 +36,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     private var lastIds = ""
     private var wallet: Tunnel.Wallet? = null
     private var session: Tunnel.Session? = null
+    /** The user stopped a live tunnel: until it is down (or they connect again), its last state brings no connection back. */
+    private var stopping = false
     private var lastBought: Long? = null
     private var lastPayFail = false
     override val awaitingPayment: Boolean
@@ -55,7 +57,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         exits = mutableListOf(); loc = ""; lockdown = false; alwaysOn = false
         balance = 0.0; added = 0.0; popover = false; warm = false; autoRenew = true; arPast4 = true; free = false
         syncT = 0.0
-        lastIds = ""; lastState = null; wallet = null; session = null; lastBought = null; dataKnown = false
+        lastIds = ""; lastState = null; wallet = null; session = null; lastBought = null; dataKnown = false; stopping = false
         load()
     }
 
@@ -187,7 +189,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     /* ---- the session ---- */
     private fun syncSession(tn: Tunnel, dt: Double) {
         val st = tn.state
-        val s = tn.session?.takeIf { st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING }
+        if (st == Tunnel.State.DISCONNECTED || st == Tunnel.State.ERROR) stopping = false
+        val s = tn.session?.takeIf { !stopping && st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING }
         session = s
         // alloc/free describe the live session only: a new session buys its own chunk.
         if (s == null || st == Tunnel.State.ERROR) { alloc.clear(); allocAt.clear(); free = false }
@@ -200,6 +203,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             lastState = st
         }
         when {
+            stopping -> { conn = Conn.IDLE; pause = null; sessionStart = null }   // the stop is still on its way to the tunnel
             st == Tunnel.State.DISCONNECTED || st == Tunnel.State.ERROR -> {
                 if (conn != Conn.IDLE) { conn = Conn.IDLE; pause = null; offConfirm = false; nextCheck = t + 20; sessionStart = null }
             }
@@ -316,6 +320,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override fun runCheck() { nextCheck = Double.MAX_VALUE }
 
     override fun doConnect(id: String) {
+        stopping = false
         home(); sheet = null; fullMsg = null; flash = null; fq.clear(); offConfirm = false; better = null
         loc = id; conn = Conn.CONNECTING; pause = null; cStart = now(); cDur = 60_000
         val tn = tunnel()
@@ -325,10 +330,15 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         save(); emit()
     }
 
-    override fun disconnect() { super.disconnect(); hooks.disconnectVpn() }
-    override fun onCancel() = hooks.disconnectVpn()
-    override fun onTurnOff() = hooks.disconnectVpn()
-    override fun onPayLockdownOff() = hooks.disconnectVpn()
+    override fun disconnect() { super.disconnect(); stopTunnel() }
+    override fun onCancel() = stopTunnel()
+    override fun onTurnOff() = stopTunnel()
+    override fun onPayLockdownOff() = stopTunnel()
+    private fun stopTunnel() {
+        val st = tunnel().state
+        stopping = st == Tunnel.State.CONNECTED || st == Tunnel.State.CONNECTING || st == Tunnel.State.DISCONNECTING
+        hooks.disconnectVpn()
+    }
 
     /** Prototype-only actions (scenarios, simulated events and settings the core decides itself). */
     private val ignored = setOf(
