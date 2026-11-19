@@ -13,6 +13,8 @@ if [ ! -d gnosis_vpn-android ]; then
     git apply /root/upload/0001-android-target.patch
     cp -r /root/upload/gnosis_vpn-android .
 fi
+# A failed test or build must not leave the previous library for rebuild.sh or run.sh to copy.
+rm -f /root/out/*/libgnosisvpn.so
 targets=""; for a in $ABIS; do targets="$targets -t $a"; done
 if [ "$PROFILE" = fast ]; then
     # Release without LTO: minutes from scratch instead of a fat-LTO link per ABI.

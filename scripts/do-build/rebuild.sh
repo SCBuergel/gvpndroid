@@ -13,8 +13,9 @@ scp -q -r "${SSH_OPTS[@]}" rust/gnosis_vpn-android/Cargo.toml rust/gnosis_vpn-an
 # The build script too, so changes to it take effect on the kept droplet.
 scp -q "${SSH_OPTS[@]}" scripts/do-build/build-remote.sh "root@$ip:/root/upload/build-remote.sh"
 s=$(date +%s)
+# pipefail keeps ssh's status: a failed build or contract test stops here, before any copy.
 ssh "${SSH_OPTS[@]}" "root@$ip" "ABIS='$ABIS' PROFILE=$PROFILE bash /root/upload/build-remote.sh" 2>&1 \
-    | grep -E '^(error|warning: unused)|^ *--> gnosis_vpn-android|STEP|could not compile|^test |panicked' || true
+    | { grep -E '^(error|warning: unused)|^ *--> gnosis_vpn-android|STEP|could not compile|^test |panicked' || true; }
 for abi in $ABIS; do
     mkdir -p "app/src/main/jniLibs/$abi"
     scp -q "${SSH_OPTS[@]}" "root@$ip:/root/out/$abi/libgnosisvpn.so" "app/src/main/jniLibs/$abi/libgnosisvpn.so.part"
