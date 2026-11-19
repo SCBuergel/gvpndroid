@@ -161,17 +161,25 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_command(
 }
 
 fn command(text: &str) -> Result<String, String> {
+    command_within(text, COMMAND_TIMEOUT)
+}
+
+fn command_within(text: &str, timeout: Duration) -> Result<String, String> {
     // Never echo the command: some carry secrets (FundingTool), and the reply ends up in logs.
     let cmd: WorkerCommand = serde_json::from_str(text)
         .map_err(|e| format!("bad command ({:?} error at line {} column {})", e.classify(), e.line(), e.column()))?;
     let sender = to_core().ok_or("core is not running")?;
     runtime().block_on(async move {
         let (resp, rx) = oneshot::channel();
-        sender.send(WorkerToCore::WorkerCommand { cmd, resp }).await.map_err(|_| "core stopped".to_string())?;
-        let response = tokio::time::timeout(COMMAND_TIMEOUT, rx)
+        // One deadline for the send and the reply: a backlogged core channel must not block the
+        // caller for good (a send still waiting at the deadline is withdrawn).
+        let exchange = async {
+            sender.send(WorkerToCore::WorkerCommand { cmd, resp }).await.map_err(|_| "core stopped".to_string())?;
+            rx.await.map_err(|_| "core dropped the command".to_string())
+        };
+        let response = tokio::time::timeout(timeout, exchange)
             .await
-            .map_err(|_| "core did not answer within 60 s".to_string())?
-            .map_err(|_| "core dropped the command".to_string())?;
+            .map_err(|_| format!("core did not answer within {} s", timeout.as_secs()))??;
         serde_json::to_string(&response).map_err(|e| format!("response not serializable: {e}"))
     })
 }
@@ -239,8 +247,16 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_stopCore(_env: *mut 
     // already handed over its sender, Shutdown reaches the running core.
     STOP_REQUESTED.store(true, Ordering::SeqCst);
     if let Some((_, sender)) = TO_CORE.lock().unwrap().take() {
-        let _ = sender.try_send(WorkerToCore::Shutdown);
+        send_shutdown(sender);
     }
+}
+
+/// Queues Shutdown without blocking the caller: an awaited send on the runtime, so a full core
+/// channel delays it instead of dropping it (the task keeps the channel open until it is in).
+fn send_shutdown(sender: mpsc::Sender<WorkerToCore>) {
+    runtime().spawn(async move {
+        let _ = sender.send(WorkerToCore::Shutdown).await;
+    });
 }
 
 /// Answers a request of the core of `generation`; dropped if that core is no longer running.
@@ -364,7 +380,7 @@ fn prepare_and_spawn(
                 // core runs its own teardown (tasks started during init) instead of serving.
                 if STOP_REQUESTED.load(Ordering::SeqCst) {
                     if let Some((_, sender)) = TO_CORE.lock().unwrap().take() {
-                        let _ = sender.try_send(WorkerToCore::Shutdown);
+                        send_shutdown(sender);
                     }
                     tracing::info!("core stopped while starting; shutting it down");
                 }
@@ -543,6 +559,35 @@ mod tests {
     use gnosis_vpn_lib::command::WorkerCommand;
     use serde_json::Value;
 
+    /// Tests that set the process-wide TO_CORE run one at a time.
+    static TO_CORE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A full core channel bounds a command by its deadline instead of blocking the caller.
+    #[test]
+    fn command_on_a_backlogged_core_times_out() {
+        let _serial = TO_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let (sender, _rx) = tokio::sync::mpsc::channel(1);
+        sender.try_send(gnosis_vpn_lib::event::WorkerToCore::Shutdown).unwrap();
+        *super::TO_CORE.lock().unwrap() = Some((7, sender));
+        let err = super::command_within(r#"{"type":"status"}"#, std::time::Duration::from_millis(100)).unwrap_err();
+        super::TO_CORE.lock().unwrap().take();
+        assert!(err.contains("did not answer"), "{err}");
+    }
+
+    /// Shutdown waits for room in a full core channel instead of being dropped.
+    #[test]
+    fn shutdown_is_delivered_once_a_full_channel_drains() {
+        use gnosis_vpn_lib::event::WorkerToCore;
+        let (sender, mut rx) = tokio::sync::mpsc::channel(1);
+        sender.try_send(WorkerToCore::Shutdown).unwrap();
+        super::send_shutdown(sender);
+        super::runtime().block_on(async {
+            assert!(matches!(rx.recv().await, Some(WorkerToCore::Shutdown)));
+            assert!(matches!(rx.recv().await, Some(WorkerToCore::Shutdown)));
+            assert!(rx.recv().await.is_none());
+        });
+    }
+
     fn fixture() -> Value {
         serde_json::from_str(include_str!("../tests/protocol.json")).expect("tests/protocol.json is JSON")
     }
@@ -580,6 +625,7 @@ mod tests {
     /// A request of an earlier core is never answered into a later one (request ids restart).
     #[test]
     fn responses_reach_only_the_core_that_asked() {
+        let _serial = TO_CORE_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let (sender, _rx) = tokio::sync::mpsc::channel::<gnosis_vpn_lib::event::WorkerToCore>(1);
         *super::TO_CORE.lock().unwrap() = Some((5, sender));
         assert!(super::to_core_of(4).is_none());
