@@ -71,4 +71,19 @@ class R7_8PatchReapplyTest {
         val (e4, o4) = build("bad")
         assertNotEquals(o4, 0, e4); assertFalse(lib.exists())
     }
+
+    @Test
+    fun rebuildUploadsThePatch() {
+        val root = tmp.newFolder("repo"); File(root, "scripts/do-build").mkdirs()
+        File("../scripts/do-build/rebuild.sh").copyTo(File(root, "scripts/do-build/rebuild.sh"))
+        val home = tmp.newFolder("home2")
+        File(home, ".local/state/gvpndroid-do").apply { mkdirs() }.resolve("current").writeText("ip=192.0.2.1\nknown_hosts=/dev/null\n")
+        val bin = tmp.newFolder("bin2"); val log = File(tmp.root, "scp.log")
+        File(bin, "ssh").writeText("#!/bin/bash\nexit 0\n")
+        File(bin, "scp").writeText("#!/bin/bash\nd=\"\${@: -1}\"\ncase \"\$d\" in root@*) echo \"\$*\" >> '${log.path}' ;; *) echo new > \"\$d\" ;; esac\n")
+        bin.listFiles()!!.forEach { it.setExecutable(true) }
+        val (exit, out) = sh(root, "bash scripts/do-build/rebuild.sh", mapOf("HOME" to home.path, "PATH" to "${bin.path}:${System.getenv("PATH")}", "ABIS" to "x86_64"))
+        assertEquals(out, 0, exit)
+        assertTrue(log.readText(), log.readLines().any { it.contains("rust/patches/0001-android-target.patch") && it.endsWith(" root@192.0.2.1:/root/upload/") })
+    }
 }
