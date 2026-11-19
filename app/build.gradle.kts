@@ -50,13 +50,12 @@ android {
     testOptions {
         // The WireGuard config parser reads Build.VERSION; let android.jar stubs return defaults.
         unitTests.isReturnDefaultValues = true
-        // Tests that run or read these scripts: rerun them when a script changes.
+        // Files outside app/ that tests run or read (R7_12TestInputsTest checks the list): a change
+        // to one alone reruns the tests. Python's __pycache__ is no input (the tests write it).
         unitTests.all {
-            it.inputs.file("../scripts/gnosis-emulator.sh")
-            it.inputs.file("../scripts/do-build/lib.sh")
-            it.inputs.file("../scripts/do-build/rebuild.sh")
-            it.inputs.file("../scripts/do-build/build-remote.sh")
-            it.inputs.file("../scripts/do-build/droplet.py")
+            it.inputs.files(fileTree("../scripts") { exclude("**/__pycache__/**") }).withPropertyName("scripts")
+            it.inputs.file("../rust/gnosis_vpn-android/tests/protocol.json")
+            it.inputs.file("../rust/patches/0001-android-target.patch")
         }
     }
 
