@@ -8,7 +8,11 @@ import java.io.Closeable
  * longer [wanted] (a disconnect, give-up or shutdown began): a request answered after the close
  * can neither keep a tun open nor mark the tunnel connected.
  */
-internal class TunSlot<T : Closeable>(private val wanted: () -> Boolean) {
+internal class TunSlot<T : Closeable>(
+    /** Runs at the end of [close], under the lock: drops tun fds queued for the core (lib.rs). */
+    private val released: () -> Unit = {},
+    private val wanted: () -> Boolean,
+) {
     enum class Answer { HANDED, REFUSED, BUILD_NEW }
 
     private var tun: T? = null
@@ -36,9 +40,11 @@ internal class TunSlot<T : Closeable>(private val wanted: () -> Boolean) {
         return true
     }
 
+    /** Closes the tun for good (disconnect, give-up, shutdown). */
     @Synchronized fun close() {
         tun?.let { runCatching { it.close() } }
         tun = null
         params = null
+        released()
     }
 }

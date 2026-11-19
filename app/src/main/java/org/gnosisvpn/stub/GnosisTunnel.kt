@@ -38,7 +38,10 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     private var wantConnected: Boolean
         get() = intent.wanted
         set(v) { intent.wanted = v }
-    private val tuns = TunSlot<ParcelFileDescriptor> { wantConnected }
+    // A tun fd handed to the core that it never took would keep the VPN up after the close.
+    private val tuns = TunSlot<ParcelFileDescriptor>(released = {
+        if (GnosisNative.loadError == null) GnosisNative.dropQueuedTuns().let { if (it > 0) LogBuffer.log("gnosis: closed $it tun fd(s) the core never took") }
+    }) { wantConnected }
     /** Retries a core start without network while a connect is under way; disconnect and shutdown wake it. */
     private val startRetry = StartRetry({ wantConnected && state == Tunnel.State.CONNECTING })
     @Volatile private var status: org.json.JSONObject? = null

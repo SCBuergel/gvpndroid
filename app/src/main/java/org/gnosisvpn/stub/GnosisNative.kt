@@ -43,6 +43,12 @@ object GnosisNative {
      */
     @JvmStatic external fun tunReadyFor(generation: Long, requestId: Long, fd: Int): String?
 
+    /**
+     * Closes the tun fds handed with [tunReadyFor] that no core took (an abandoned bring-up), so
+     * they cannot keep the VPN up; the number closed. Only when the tun is closed for good.
+     */
+    @JvmStatic external fun dropQueuedTuns(): Int
+
     @JvmStatic external fun stopCore()
 
     /** Generation of the most recently started core; lifecycle events carry it. */

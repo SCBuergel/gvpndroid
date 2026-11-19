@@ -43,6 +43,9 @@ static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 static TO_CORE: Mutex<Option<(u64, mpsc::Sender<WorkerToCore>)>> = Mutex::new(None);
 /// Our end of the TUN fd-passing socket; the core's end is registered with `set_tun_fd_socket`.
 static TUN_SOCKET: OnceLock<UnixStream> = OnceLock::new();
+/// A clone of the core's end, to close fds queued for a bring-up the core abandoned: such an fd
+/// is a reference to the tun and would keep Android's VPN up after the app closed its own.
+static TUN_DRAIN: OnceLock<UnixStream> = OnceLock::new();
 /// Set while a core is starting or running; guards against a second core in the process.
 static STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by `stopCore`; a core whose init is still running is shut down instead of serving.
@@ -257,6 +260,48 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReadyFor(
     }
 }
 
+/// `GnosisNative.dropQueuedTuns(): Int` — closes the tun fds queued for the core that no
+/// bring-up took; the number closed. GnosisTunnel calls it when it closes its tun for good, under
+/// the lock it hands tuns under, so no fd a live bring-up is about to read is taken.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_dropQueuedTuns(_env: *mut JNIEnv, _class: jclass) -> jint {
+    drop_queued_tuns() as jint
+}
+
+fn drop_queued_tuns() -> usize {
+    let n = TUN_DRAIN.get().map_or(0, drain_fds);
+    if n > 0 {
+        tracing::warn!(n, "closed tun fd(s) the core never took");
+    }
+    n
+}
+
+/// Receives and closes every fd queued on `sock`. MSG_DONTWAIT instead of O_NONBLOCK: the socket's
+/// blocking mode, shared with the core's end, stays as the core's own receive expects it.
+fn drain_fds(sock: &UnixStream) -> usize {
+    use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags};
+    use std::io::IoSliceMut;
+    use std::mem::MaybeUninit;
+    let mut closed = 0;
+    loop {
+        let mut byte = [0u8];
+        let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(2))];
+        let mut control = RecvAncillaryBuffer::new(&mut space);
+        let flags = RecvFlags::DONTWAIT | RecvFlags::CMSG_CLOEXEC;
+        match rustix::net::recvmsg(sock, &mut [IoSliceMut::new(&mut byte)], &mut control, flags) {
+            Ok(msg) if msg.bytes > 0 => {
+                for message in control.drain() {
+                    if let RecvAncillaryMessage::ScmRights(fds) = message {
+                        closed += fds.count(); // each OwnedFd closes as it is dropped
+                    }
+                }
+            }
+            // Nothing queued (EAGAIN), the peer closed, or an error: nothing more to drop.
+            _ => return closed,
+        }
+    }
+}
+
 /// `GnosisNative.coreGeneration(): Long` — the generation of the most recently started core
 /// (lifecycle events carry it), read right after a successful `startCore`.
 #[unsafe(no_mangle)]
@@ -390,6 +435,7 @@ fn prepare_and_spawn(
 
     if TUN_SOCKET.get().is_none() {
         let (ours, cores) = UnixStream::pair().map_err(|e| format!("socketpair: {e}"))?;
+        let _ = TUN_DRAIN.set(cores.try_clone().map_err(|e| format!("socketpair clone: {e}"))?);
         socket::worker::set_tun_fd_socket(cores);
         let _ = TUN_SOCKET.set(ours);
     }
@@ -419,6 +465,8 @@ fn prepare_and_spawn(
                 // with this identity can start while this one is alive.
                 core.start().await;
                 TO_CORE.lock().unwrap().take();
+                // No bring-up of this core waits for a queued fd any more.
+                drop_queued_tuns();
                 // Event before releasing STARTED, and tagged: a new core can only start after it.
                 push_event(json!({ "type": "core_stopped", "generation": generation }));
                 STARTED.store(false, Ordering::SeqCst);
@@ -667,6 +715,21 @@ mod tests {
         assert!(super::to_core_of(4).is_none());
         assert!(super::to_core_of(5).is_some());
         super::TO_CORE.lock().unwrap().take();
+    }
+
+    /// A queued tun fd no core took is closed, so it holds no reference to the tun any more.
+    #[test]
+    fn queued_fds_are_closed() {
+        use std::io::Write;
+        let (ours, cores) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (pipe_r, pipe_w) = rustix::pipe::pipe().unwrap();
+        gnosis_vpn_lib::socket::fd_passing::send_fd(&ours, &pipe_r).unwrap();
+        drop(pipe_r);
+        assert_eq!(super::drain_fds(&cores), 1);
+        assert_eq!(super::drain_fds(&cores), 0);
+        assert!(!rustix::fs::fcntl_getfl(&cores).unwrap().contains(rustix::fs::OFlags::NONBLOCK), "blocking mode unchanged");
+        let err = std::fs::File::from(pipe_w).write_all(b"x").expect_err("the queued read end is closed");
+        assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
     }
 
     /// A rejected command must not echo its text (funding commands carry a secret).
