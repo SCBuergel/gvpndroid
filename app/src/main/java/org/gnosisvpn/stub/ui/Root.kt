@@ -51,6 +51,10 @@ class UiState(initialMode: String, private val saveMode: (String) -> Unit) {
     var logRelayOn by mutableStateOf(false)
     fun changeMode(m: String) { mode = m; saveMode(m) }
     fun showSnack(msg: String) { snack = msg; snackSeq++ }
+    /** Seq of the last snack handed to a snackbar host; this state outlives the activity. */
+    private var shownSeq = 0
+    /** The snack not yet shown, once: a recreated activity must not replay the last one. */
+    fun takeSnack(): String? = snack?.takeIf { snackSeq != shownSeq }?.also { shownSeq = snackSeq }
 }
 
 /** Back: dialog → sheet → page; on the main screen it leaves the app (the system handles that). */
@@ -110,7 +114,7 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
             SheetHost(eng, act) { goBack(eng, ui) }
             DialogHost(eng, act, ui)
             val host = remember { SnackbarHostState() }
-            LaunchedEffect(ui.snackSeq) { ui.snack?.let { host.currentSnackbarData?.dismiss(); host.showSnackbar(it) } }
+            LaunchedEffect(ui.snackSeq) { ui.takeSnack()?.let { host.currentSnackbarData?.dismiss(); host.showSnackbar(it) } }
             SnackbarHost(host, Modifier.align(Alignment.BottomCenter).padding(12.dp)) { Snackbar(it, containerColor = p.inv, contentColor = p.onInv, shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)) }
             if (ui.codes) CodeBadge(eng, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             Box(Modifier.testTag("screen-code:${eng.screenCode().first}"))
