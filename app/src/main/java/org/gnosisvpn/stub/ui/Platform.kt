@@ -95,7 +95,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
 /**
  * Notification actions that open UiActivity. Posting one arms it here, in the process; the
  * activity takes it once. A recreated activity, a task restored from recents or a new process
- * finds nothing armed, so the intent cannot replay the action.
+ * finds nothing armed, so the intent cannot replay the action. The flip side: after the process
+ * died, a tap on a notification still in the shade only opens the app.
+ * The ongoing notification stays posted and is not rebuilt by a tap, so its buttons stay armed;
+ * UiActivity's onCreate guards keep its intent from replaying.
  */
 object NoteTaps {
     /** Actions that show a page, and connects that may have to ask for VPN consent. */
@@ -106,8 +109,12 @@ object NoteTaps {
     fun needsUi(act: String, needsConsent: Boolean) = act in UI || (needsConsent && act in CONNECTS)
     @Synchronized fun arm(noteId: String, act: String) { armed += "$noteId/$act" }
     /** The (note, action) [put] into this intent, if armed; disarms it. */
-    @Synchronized fun take(note: String?, act: String?): Pair<String, String>? =
-        if (note != null && act != null && armed.remove("$note/$act")) note to act else null
+    @Synchronized fun take(note: String?, act: String?): Pair<String, String>? {
+        if (note == null || act == null) return null
+        val key = "$note/$act"
+        val ok = if (note == "ongoing") key in armed else armed.remove(key)
+        return if (ok) note to act else null
+    }
     fun put(i: Intent, noteId: String, act: String): Intent = i.putExtra("tapNote", noteId).putExtra("tapAct", act)
     fun take(i: Intent?): Pair<String, String>? = take(i?.getStringExtra("tapNote"), i?.getStringExtra("tapAct"))
 }

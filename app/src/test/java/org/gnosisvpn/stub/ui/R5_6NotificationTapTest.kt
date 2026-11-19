@@ -28,6 +28,12 @@ class R5_6NotificationTapTest {
         assertNull(NoteTaps.take(null, "lockOn"))
     }
 
+    @Test fun theOngoingNotificationsButtonsWorkOnEveryTap() {
+        NoteTaps.arm("ongoing", "addData")
+        assertEquals("ongoing" to "addData", NoteTaps.take("ongoing", "addData"))
+        assertEquals("second tap, notification not rebuilt", "ongoing" to "addData", NoteTaps.take("ongoing", "addData"))
+    }
+
     private class FakeScreen(override val started: Boolean) : UiFront {
         val calls = mutableListOf<String>()
         override fun openVpnSettings(): Boolean { calls += "settings"; return true }
