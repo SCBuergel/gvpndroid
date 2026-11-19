@@ -36,6 +36,10 @@ use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, oneshot};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+/// Bound on the core's wait for a tun fd. The bridge sends the fd before TunnelReady, so a
+/// bring-up never really waits; but a receive whose fd was dropped (dropQueuedTuns) or whose
+/// runner is gone would otherwise block for good and take the next connect's fd.
+const TUN_RECV_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// One runtime for the process; the core runs on it.
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
@@ -276,6 +280,12 @@ fn drop_queued_tuns() -> usize {
     n
 }
 
+/// Makes a blocking receive on `sock` (the core's recv_tun_fd) fail after `timeout` instead of
+/// waiting for good: the attempt fails and the core retries, and no stale reader stays queued.
+fn bound_reads(sock: &UnixStream, timeout: Duration) -> std::io::Result<()> {
+    sock.set_read_timeout(Some(timeout))
+}
+
 /// Receives and closes every fd queued on `sock`. MSG_DONTWAIT instead of O_NONBLOCK: the socket's
 /// blocking mode, shared with the core's end, stays as the core's own receive expects it.
 fn drain_fds(sock: &UnixStream) -> usize {
@@ -435,6 +445,7 @@ fn prepare_and_spawn(
 
     if TUN_SOCKET.get().is_none() {
         let (ours, cores) = UnixStream::pair().map_err(|e| format!("socketpair: {e}"))?;
+        bound_reads(&cores, TUN_RECV_TIMEOUT).map_err(|e| format!("socketpair timeout: {e}"))?;
         let _ = TUN_DRAIN.set(cores.try_clone().map_err(|e| format!("socketpair clone: {e}"))?);
         socket::worker::set_tun_fd_socket(cores);
         let _ = TUN_SOCKET.set(ours);
@@ -730,6 +741,16 @@ mod tests {
         assert!(!rustix::fs::fcntl_getfl(&cores).unwrap().contains(rustix::fs::OFlags::NONBLOCK), "blocking mode unchanged");
         let err = std::fs::File::from(pipe_w).write_all(b"x").expect_err("the queued read end is closed");
         assert_eq!(err.kind(), std::io::ErrorKind::BrokenPipe);
+    }
+
+    /// The core's receive of a tun fd that never comes fails after the bound instead of blocking.
+    #[test]
+    fn a_tun_fd_receive_without_fd_times_out() {
+        let (_ours, cores) = std::os::unix::net::UnixStream::pair().unwrap();
+        super::bound_reads(&cores, std::time::Duration::from_millis(200)).unwrap();
+        let start = std::time::Instant::now();
+        assert!(gnosis_vpn_lib::socket::fd_passing::recv_fd(&cores).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
     }
 
     /// A rejected command must not echo its text (funding commands carry a secret).
