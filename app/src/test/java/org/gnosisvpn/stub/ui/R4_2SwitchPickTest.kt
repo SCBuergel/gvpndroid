@@ -43,4 +43,12 @@ class R4_2SwitchPickTest {
         tn.session = session("0xa"); e.tick()
         assertEquals("0xa", e.loc); assertTrue(e.conn == Conn.CONNECTED)
     }
+
+    @Test fun anExitTheCoreWasNotToldAboutIsNotPending() {
+        val (tn, e) = connectedToA()
+        e.doConnect("0xgone")   // no longer in the exit list: selectLocation is not called
+        assertEquals(emptyList<String>(), tn.selected)
+        e.tick()   // the core stays at A: the engine follows it instead of waiting for a pick it never got
+        assertEquals("0xa", e.loc); assertEquals(Conn.CONNECTED, e.conn)
+    }
 }

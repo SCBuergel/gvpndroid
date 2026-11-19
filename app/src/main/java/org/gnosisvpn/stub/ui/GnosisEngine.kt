@@ -328,9 +328,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override fun doConnect(id: String) {
         stopping = false
         home(); sheet = null; fullMsg = null; flash = null; fq.clear(); offConfirm = false; better = null
-        loc = id; pendingExit = id; conn = Conn.CONNECTING; pause = null; cStart = now(); cDur = 60_000
+        loc = id; conn = Conn.CONNECTING; pause = null; cStart = now(); cDur = 60_000
         val tn = tunnel()
-        tn.locations.firstOrNull { it.id == id }?.let { tn.selectLocation(it) }
+        tn.locations.firstOrNull { it.id == id }?.let { pendingExit = id; tn.selectLocation(it) }   // only an exit the core was told about
         // Also while a disconnect is still running: the tunnel connects once it has finished.
         if (tn.state == Tunnel.State.DISCONNECTED || tn.state == Tunnel.State.ERROR || tn.state == Tunnel.State.DISCONNECTING) hooks.connectVpn()
         save(); emit()
