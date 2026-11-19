@@ -28,6 +28,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     override val autoRenewFixed = true
     override val canUploadLogs = false
     override val retryCountdown = false
+    override val holdsData = false   // PIX chunks are per session: nothing stays at an exit after it
 
     private var fundAddress: String? = null
     private var need: String? = null
@@ -188,6 +189,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         val st = tn.state
         val s = tn.session?.takeIf { st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING }
         session = s
+        // alloc/free describe the live session only: a new session buys its own chunk.
+        if (s == null || st == Tunnel.State.ERROR) { alloc.clear(); allocAt.clear(); free = false }
         if (st != lastState) {
             if (st == Tunnel.State.ERROR && lastState != null) {
                 conn = Conn.IDLE
@@ -204,6 +207,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
             s == null -> if (conn != Conn.CONNECTING) { conn = Conn.CONNECTING; cStart = now(); cDur = 60_000 }   // waiting for the core
             else -> {
                 if (s.exitId.isNotEmpty() && exits.any { it.id == s.exitId }) loc = s.exitId
+                alloc.keys.retainAll { it == loc }; allocAt.keys.retainAll { it == loc }
                 val e = ex(loc)
                 s.bytesLeft?.let { alloc[loc] = it / 1e6 }
                 free = s.payment == Tunnel.Payment.FREE

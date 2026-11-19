@@ -195,7 +195,7 @@ private fun ExitRow(eng: Engine, act: Act, x: Exit, on: Boolean, b: Exit?, divid
 @Composable
 private fun HoldPill(eng: Engine, id: String) {
     val p = LocalPal.current
-    val a = eng.left(id); if (!(a > 0) || id == eng.loc) return
+    val a = eng.left(id); if (!eng.holdsData || !(a > 0) || id == eng.loc) return
     val m = (eng.heldLeft(id) / 60).roundToInt()
     Tip("Data you left here. It stays for ${dur(m)}, then it is gone.") {
         Row(Modifier.height(20.dp).clip(RoundedCornerShape(10.dp)).background(p.sc).padding(start = 5.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {

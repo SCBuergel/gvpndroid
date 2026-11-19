@@ -167,6 +167,8 @@ open class Engine {
     open val autoRenewFixed = false
     /** A failed renewal is retried on a schedule the engine knows (a countdown is shown); false = the backend retries by itself. */
     open val retryCountdown = true
+    /** Data left at an exit stays there for a while after leaving it (the prototype's hold); false = it ends with the session. */
+    open val holdsData = true
     /** Log upload to support exists. */
     open val canUploadLogs = true
     /** How far the connect is, 0..1, when the backend reports it; null = time-based. */

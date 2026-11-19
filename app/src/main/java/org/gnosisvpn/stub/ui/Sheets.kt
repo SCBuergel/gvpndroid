@@ -137,7 +137,7 @@ private fun Flow(eng: Engine, parts: List<Pair<String, String>>, iconId: String?
 private fun Leave(eng: Engine, toId: String) {
     val p = LocalPal.current
     val a = eng.left(eng.loc)
-    if (!(a > 0) || toId == eng.loc || !(eng.isOn() || eng.conn == Conn.PAUSED)) return
+    if (!eng.holdsData || !(a > 0) || toId == eng.loc || !(eng.isOn() || eng.conn == Conn.PAUSED)) return
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.sc).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Ms("savings", size = 20.dp, tint = p.onSc)
         Text(rich("**${a.roundToInt()} MB** stays at ${eng.ex(eng.loc).city} for ${dur((eng.heldLeft(eng.loc) / 60).roundToInt())}."), style = T.bm, color = p.onSc)
