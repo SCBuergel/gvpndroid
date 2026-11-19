@@ -10,6 +10,7 @@
 # The DigitalOcean token is read by droplet.py from $DO_TOKEN_FILE (default ~/do-api-token).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+. scripts/do-build/lib.sh
 REPO=$(pwd)
 SIZE=${SIZE:-c-32}; REGION=${REGION:-ams3}; PROFILE=${PROFILE:-fast}; ABIS=${ABIS:-arm64-v8a x86_64}
 CLIENT_REV=${CLIENT_REV:-8a0e3be}; DEADLINE_S=${DEADLINE_S:-21600}
@@ -43,7 +44,7 @@ trap 'exit 130' INT TERM HUP
 
 python3 -I scripts/do-build/droplet.py create "$NAME" "$SIZE" "$REGION" "$ST/id_ed25519.pub" > "$ST/$NAME.create" &
 cpid=$!
-for _ in $(seq 1 30); do id=$(head -1 "$ST/$NAME.create" 2>/dev/null || true); [ -n "$id" ] && break; sleep 1; done
+id=$(await_id "$ST/$NAME.create" $cpid)   # as long as the create runs: a late id still gets a deadline
 [ -n "$id" ] || { wait $cpid || true; echo "droplet creation failed" >&2; exit 1; }
 python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
 wait $cpid

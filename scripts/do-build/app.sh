@@ -12,6 +12,7 @@
 #          app/build/remote/{test-results,reports}, app/build/remote/build.log
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+. scripts/do-build/lib.sh
 REPO=$(pwd)
 SIZE=${SIZE:-s-8vcpu-16gb}; REGION=${REGION:-fra1}; DEADLINE_S=${DEADLINE_S:-3600}
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
@@ -41,7 +42,7 @@ trap 'exit 130' INT TERM HUP
 
 python3 -I scripts/do-build/droplet.py create "$NAME" "$SIZE" "$REGION" "$ST/id_ed25519.pub" > "$W/create" &
 cpid=$!
-for _ in $(seq 1 30); do id=$(head -1 "$W/create" 2>/dev/null || true); [ -n "$id" ] && break; sleep 1; done
+id=$(await_id "$W/create" $cpid)   # as long as the create runs: a late id still gets a deadline
 [ -n "$id" ] || { wait $cpid || true; echo "droplet creation failed" >&2; exit 1; }
 python3 "$DEADLINE" start "$NAME" "$DEADLINE_S" -- python3 -I "$REPO/scripts/do-build/droplet.py" delete "$id"
 wait $cpid

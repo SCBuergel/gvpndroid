@@ -252,6 +252,7 @@ In the app: "Use Gnosis VPN", then Connect. Disconnect before installing an upda
     ABIS=arm64-v8a scripts/do-build/run.sh       # phone only
     KEEP=1 scripts/do-build/run.sh               # keep the droplet: rebuild.sh, then down.sh
     scripts/do-build/app.sh                      # the APK: assemble, lint, unit tests on a droplet (~15 min, 1 h deadline)
+    scripts/do-build/test-await-id.sh            # offline check of the droplet-id wait (~35 s)
 
 Every build first runs the crate's contract tests (`cargo test -p gnosis_vpn-android`, host
 target, part of `build-remote.sh`; `TESTS=0` skips them); a failing test stops the build. Rebuild after every change under `rust/`: the libraries in `jniLibs/` are not tracked.
