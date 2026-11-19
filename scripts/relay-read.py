@@ -8,7 +8,7 @@ with the developer's key. Reads ~/.config/gvpndroid-secrets/{ntfy-topic,log-x255
 Usage: scripts/relay-read.py [SINCE]   SINCE: ntfy's since= (default 1h; e.g. 30m, 12h, all)
        scripts/relay-read.py -f        follow: print new parts as they arrive, reconnecting
 """
-import base64, hashlib, json, os, re, sys, time, urllib.parse, urllib.request, zlib
+import base64, hashlib, http.client, json, os, re, sys, time, urllib.parse, urllib.request, zlib
 
 S = os.environ.get("GVPNDROID_SECRETS", os.path.expanduser("~/.config/gvpndroid-secrets"))
 TAG = b"gvpndroid-log-v1"
@@ -98,13 +98,14 @@ def follow(topic, since, priv, base="https://ntfy.sh", sleep=time.sleep):
         try:
             with urllib.request.urlopen(f"{base}/{topic}/json?since={urllib.parse.quote(since, safe='')}", timeout=FOLLOW_SECS) as r:
                 for line in r:
-                    delay = 2  # the stream works again
                     m = json.loads(line)
+                    if m.get("event") in ("message", "keepalive"):
+                        delay = 2  # the stream works again
                     show(m, priv)
                     if m.get("event") == "message" and m.get("id"):
                         since = str(m["id"])
             why = "stream closed"
-        except (OSError, ValueError) as ex:  # URLError, HTTPError and timeouts are OSErrors
+        except (OSError, ValueError, http.client.HTTPException) as ex:  # URLError, HTTPError, timeouts: OSError; a cut chunk: IncompleteRead
             why = type(ex).__name__
         print(f"relay-read: {why}; reconnecting in {delay} s", file=sys.stderr, flush=True)
         sleep(delay)
