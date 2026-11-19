@@ -18,14 +18,13 @@ import org.gnosisvpn.stub.ui.ongoingNote
 class TunnelService : Service() {
     private val tunnel get() = App.instance.tunnel
 
-    private val listener = Tunnel.Listener { state, _ ->
-        when (state) {
-            Tunnel.State.DISCONNECTED, Tunnel.State.ERROR -> {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
-            else -> notify(state)
-        }
+    // Decides on the tunnel's state now, not the posted one: a connect may have followed it.
+    private val listener = Tunnel.Listener { posted, _ ->
+        val now = subscription?.tunnel?.state ?: posted
+        if (serviceStops(now)) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        } else notify(now)
     }
 
     /** On the tunnel of onCreate: App.tunnel may be another one by onDestroy. */
@@ -124,7 +123,10 @@ class TunnelService : Service() {
 }
 
 /** [listener] added to [tunnel]; [cancel] removes it from that same tunnel. */
-internal class Subscription(private val tunnel: Tunnel, private val listener: Tunnel.Listener) {
+internal class Subscription(val tunnel: Tunnel, private val listener: Tunnel.Listener) {
     init { tunnel.addListener(listener) }
     fun cancel() = tunnel.removeListener(listener)
 }
+
+/** Whether TunnelService stops on a state change, judged by the tunnel's [current] state. */
+internal fun serviceStops(current: Tunnel.State) = current == Tunnel.State.DISCONNECTED || current == Tunnel.State.ERROR

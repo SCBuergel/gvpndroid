@@ -5,7 +5,6 @@ import android.os.Handler
 import android.os.Looper
 import com.wireguard.android.backend.BackendException
 import com.wireguard.android.backend.GoBackend
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import com.wireguard.android.backend.Tunnel as WgTunnel
 
@@ -23,55 +22,37 @@ class WireGuardTunnel(
     onSystemStart: () -> Unit,
 ) : Tunnel {
     private val backend by lazy { GoBackend(context.applicationContext) }
-    private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private val listeners = CopyOnWriteArrayList<Tunnel.Listener>()
+    private val seq: TunnelSequence = TunnelSequence(
+        Executors.newSingleThreadExecutor(), { main.post(it) },
+        up = {
+            val config = store.load() ?: throw IllegalStateException("no config imported")
+            backend.setState(wg, WgTunnel.State.UP, config)
+            logKillSwitch()
+            "wireguard-go ${runCatching { backend.version }.getOrDefault("?")}"
+        },
+        down = { backend.setState(wg, WgTunnel.State.DOWN, null) },
+        describe = ::describe,
+    )
 
     init {
         GoBackend.setAlwaysOnCallback { onSystemStart() }
     }
 
-    @Volatile
-    override var state: Tunnel.State = Tunnel.State.DISCONNECTED
-        private set
+    override val state: Tunnel.State get() = seq.state
 
-    private val wg = object : WgTunnel {
+    private val wg: WgTunnel = object : WgTunnel {
         override fun getName() = "gvpn"
         override fun onStateChange(newState: WgTunnel.State) {
             // Called by the backend, e.g. when the system revokes the VPN or another VPN takes over.
-            if (newState == WgTunnel.State.DOWN && state == Tunnel.State.CONNECTED) {
-                set(Tunnel.State.DISCONNECTED, "tunnel went down outside the app (revoked or replaced?)")
-            }
+            if (newState == WgTunnel.State.DOWN) seq.wentDown("tunnel went down outside the app (revoked or replaced?)")
         }
     }
 
-    override fun connect() {
-        if (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED) return
-        set(Tunnel.State.CONNECTING, null)
-        worker.execute {
-            try {
-                val config = store.load() ?: throw IllegalStateException("no config imported")
-                backend.setState(wg, WgTunnel.State.UP, config)
-                set(Tunnel.State.CONNECTED, "wireguard-go ${runCatching { backend.version }.getOrDefault("?")}")
-                logKillSwitch()
-            } catch (e: Exception) {
-                set(Tunnel.State.ERROR, describe(e))
-            }
-        }
-    }
+    /** A connect during a disconnect follows it (TunnelSequence): no DISCONNECTED in between. */
+    override fun connect() = seq.connect()
 
-    override fun disconnect() {
-        if (state == Tunnel.State.DISCONNECTED || state == Tunnel.State.DISCONNECTING) return
-        set(Tunnel.State.DISCONNECTING, null)
-        worker.execute {
-            try {
-                backend.setState(wg, WgTunnel.State.DOWN, null)
-                set(Tunnel.State.DISCONNECTED, null)
-            } catch (e: Exception) {
-                set(Tunnel.State.ERROR, describe(e))
-            }
-        }
-    }
+    override fun disconnect() = seq.disconnect()
 
     override fun stats(): Tunnel.Stats? {
         if (state != Tunnel.State.CONNECTED) return null
@@ -85,19 +66,14 @@ class WireGuardTunnel(
         }
     }
 
-    override fun addListener(listener: Tunnel.Listener) { listeners += listener }
-    override fun removeListener(listener: Tunnel.Listener) { listeners -= listener }
+    override fun addListener(listener: Tunnel.Listener) { seq.listeners += listener }
+    override fun removeListener(listener: Tunnel.Listener) { seq.listeners -= listener }
 
     /** Always-on VPN + "Block connections without VPN" is Android's kill switch; the user sets it in system settings. */
     private fun logKillSwitch() {
         val alwaysOn = runCatching { backend.isAlwaysOn }.getOrNull()
         val lockdown = runCatching { backend.isLockdownEnabled }.getOrNull()
         LogBuffer.log("system kill switch: always-on=$alwaysOn, block-without-VPN=$lockdown")
-    }
-
-    private fun set(s: Tunnel.State, detail: String?) {
-        state = s
-        main.post { listeners.forEach { it.onStateChanged(s, detail) } }
     }
 
     private fun describe(e: Exception): String =
