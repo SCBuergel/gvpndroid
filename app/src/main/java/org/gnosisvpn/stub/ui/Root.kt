@@ -79,7 +79,6 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
             else -> eng.act(a, d)
         }
     }
-    val viz = remember { Viz() }
     GnosisTheme(ui.mode) {
         val p = LocalPal.current
         Column(Modifier.fillMaxSize().background(p.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -107,7 +106,8 @@ fun GnosisApp(eng: Engine, ui: UiState, debug: Boolean, extra: SettingsExtra, op
                     "settings" -> SettingsPage(eng, act, debug, extra, ui)
                     "add" -> AddPage(eng, act)
                     "payout" -> PayOutPage(eng, act)
-                    "traffic" -> { LaunchedEffect(Unit) { viz.eps.clear(); viz.c = null; viz.dpk = 0.0; viz.upk = 0.0 }; TrafficPage(eng, act, viz, ui.vizMb) { ui.vizMb = !ui.vizMb } }
+                    // A fresh Viz per visit: its times (bwAt, nextChurn, relT0, last) are on the visit's own clock, which starts at 0.
+                    "traffic" -> { val viz = remember { Viz() }; TrafficPage(eng, act, viz, ui.vizMb) { ui.vizMb = !ui.vizMb } }
                     else -> Box(Modifier)
                 }
             }
