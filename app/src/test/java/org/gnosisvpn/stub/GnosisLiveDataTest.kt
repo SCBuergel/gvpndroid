@@ -121,4 +121,33 @@ class GnosisLiveDataTest {
         assertEquals(9000L to 500L, r)
         assertNull(GnosisProtocol.rxTx("""{"type":"nerd_stats","data":{"type":"no_info"}}"""))
     }
+
+    @Test fun whyAnExitCannotBeReached() {
+        assertEquals("No relay path to the exit right now (0 forward, 2 return). Last error: no path found",
+            GnosisProtocol.whyNot(JSONObject("""{"state":{"type":"not_routable"},"walk":{"type":"no_path","walked_at":1,"forward_count":0,"return_count":2},"last_error":"no path found","quick_probe":null}""")))
+        assertEquals("The exit refused the session: handshake timeout.",
+            GnosisProtocol.whyNot(JSONObject("""{"state":{"type":"unrecoverable","reason":{"type":"cannot_open_session","error":"handshake timeout"}},"walk":null,"last_error":null}""")))
+        // a connect reply carries only the state
+        assertEquals("This exit runs a version this app cannot talk to.",
+            GnosisProtocol.whyNot(JSONObject("""{"type":"unrecoverable","reason":{"type":"incompatible_api_version","offered":[]}}""")))
+        val h = GnosisProtocol.health(JSONObject("""{"state":{"type":"not_routable"},"walk":{"type":"not_announced","walked_at":1},"last_error":null,"quick_probe":null}"""), null)
+        assertEquals("The exit has not announced itself on the network, so there is no way to reach it.", h.why)
+        assertNull(GnosisProtocol.health(JSONObject("""{"state":{"type":"routable"},"last_error":null,"walk":null,"quick_probe":null}"""), null).why)
+    }
+
+    @Test fun connectRefusals() {
+        assertNull(GnosisProtocol.connectRefusal("""{"type":"connect","data":{"type":"connecting","destination":{}}}"""))
+        assertNull(GnosisProtocol.connectRefusal("""{"type":"connect","data":{"type":"waiting_to_connect","destination":{},"route_health":{"type":"not_routable"}}}"""))
+        assertEquals("There is no route to this exit right now.",
+            GnosisProtocol.connectRefusal("""{"type":"connect","data":{"type":"unable_to_connect","destination":{},"route_health":{"type":"not_routable"}}}"""))
+        assertEquals("worker offline", GnosisProtocol.connectRefusal("""{"error":"worker offline"}"""))
+        assertEquals("The Gnosis VPN core did not answer.", GnosisProtocol.connectRefusal(null))
+    }
+
+    @Test fun verifyPingCountsAsConnected() {
+        val s = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"verify_ping"},"pix":null}"""))!!
+        assertEquals(s.steps - 1, s.step)
+        val early = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"establish_wg_tunnel"},"pix":null}"""))!!
+        assertTrue(early.step!! < early.steps - 1)
+    }
 }

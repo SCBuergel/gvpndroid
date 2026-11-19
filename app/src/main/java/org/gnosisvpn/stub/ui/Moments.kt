@@ -26,9 +26,11 @@ fun Engine.moment(): Msg? {
         Pause.BALANCE -> return Msg(Tone.BAD, "pause_circle", "Internet paused.",
             if (lockdown) "No data at ${e.city} and none in your balance. Paying needs the VPN and Lockdown off for a moment."
             else "No data at ${e.city} and none in your balance. Add data to continue.")
-        Pause.RENEWFAIL -> return Msg(Tone.BAD, "sync_problem", "Couldn’t pay for data.",
-            "Your VPN balance may be too low. " + (if (retryCountdown) "Trying again in {retry}." else "Gnosis VPN keeps trying.") +
-                " ${e.city} holds your traffic meanwhile, so nothing leaks.", listOf("Add funds" to "addData"))
+        Pause.RENEWFAIL -> return Msg(Tone.BAD, "sync_problem", "Paused: payment failed.",
+            "${e.city} holds your traffic until a payment goes through, so nothing leaks. " +
+                (if (retryCountdown) "Trying again in {retry}." else "Gnosis VPN keeps retrying.") +
+                (if (balanceLow()) " Your balance is low." else ""),
+            if (balanceLow()) listOf("Add funds" to "addData") else null)
         null -> {}
     }
     if (conn == Conn.RECONNECTING) return if (lockdown)
@@ -36,6 +38,11 @@ fun Engine.moment(): Msg? {
     else Msg(Tone.WARN, "warning", "Reconnecting.", "Lockdown is off, so traffic isn’t protected until the connection is back.")
     if (conn == Conn.CONNECTING) return Msg(Tone.INFO, "info", "Connecting to ${e.city}.",
         if (!metered) "Opening a route through the mixnet." else if (a > 0) "Uses the ${a.roundToInt()} MB left here." else if (free) "Setting aside your free ${chunkTxt()} at ${e.city}." else "Setting aside ${chunkTxt()} at ${e.city}.")
+    if (conn == Conn.CONNECTED && awaitingPayment) return Msg(if (paymentFailed) Tone.WARN else Tone.INFO, "hourglass_top", "Waiting for ${e.city} to see your payment.",
+        (if (paymentFailed) "The last payment failed; Gnosis VPN retries it automatically."
+         else "On a new connection this takes up to about 3 minutes while Gnosis Chain confirms it.") +
+            " Traffic resumes by itself." + (if (balanceLow()) " Your balance is low." else ""),
+        if (balanceLow()) listOf("Add funds" to "addData") else null)
     flash?.let { f -> return Msg(f.tone, TONE_ICON[f.tone] ?: "info", f.lead, f.text, f.btns.ifEmpty { null }) }
     if (conn == Conn.IDLE && ldOffPay && pay != null) return Msg(Tone.INFO, "hourglass_top", "Waiting for payment…", "Usually about 2 minutes. Connect becomes available once it arrives.")
     if (conn == Conn.CONNECTED) {
@@ -71,7 +78,7 @@ fun Engine.simpleLine(m: Msg): Msg {
     var lead = m.lead; var text = m.text; var btns = m.btns
     fun first(t: String) = t.split(Regex("(?<=\\.)\\s"))[0]
     if (conn == Conn.PAUSED && lead != flash?.lead) {
-        text = when (pause) { Pause.NODATA -> "Your traffic stays private."; Pause.OFFLINE -> "The data left there is lost."; Pause.BALANCE -> "Your balance is empty."; Pause.RENEWFAIL -> "Your VPN balance may be too low."; null -> text }
+        text = when (pause) { Pause.NODATA -> "Your traffic stays private."; Pause.OFFLINE -> "The data left there is lost."; Pause.BALANCE -> "Your balance is empty."; Pause.RENEWFAIL -> if (balanceLow()) "Your balance is low." else "Gnosis VPN keeps retrying."; null -> text }
         if (pause != Pause.RENEWFAIL) btns = null
     } else if (conn == Conn.CONNECTED && left() <= LOW && !autoRenew && lead.contains("MB left")) { lead = "Data running low."; text = "About ${dur(minsLeft())} left." }
     else if (lead.startsWith("Better exit now")) { lead = "${exOrNull(better)?.city} is faster now."; text = "" }
@@ -138,10 +145,11 @@ fun Engine.ongoingNote(): Note? {
         Conn.CONNECTED -> Note("ongoing", "Connected · ${e.city}", if (left() > 0) "${mb(left())} left" + (timeLeft()?.let { " · $it" } ?: "") else "Rotating relays", listOf("Disconnect" to "disconnect"))
         Conn.RECONNECTING -> Note("ongoing", "Reconnecting…", if (lockdown) "Lockdown on: internet blocked until the connection is back." else "Traffic isn’t protected until the connection is back.", listOf("Disconnect" to "disconnect"))
         Conn.PAUSED -> {
-            val why = when (pause) { Pause.NODATA -> "No data left at ${e.city}."; Pause.OFFLINE -> "${e.city} went offline."; Pause.BALANCE -> "No data and none in your balance."; else -> "Couldn’t pay for data; your balance may be too low." }
+            val why = when (pause) { Pause.NODATA -> "No data left at ${e.city}."; Pause.OFFLINE -> "${e.city} went offline."; Pause.BALANCE -> "No data and none in your balance."; else -> "Payment failed; retrying." }
             Note("ongoing", "Internet paused", "$why Traffic stays blocked.", when (pause) {
                 Pause.NODATA -> listOf("Renew · ${chunkTxt()}" to "renew"); Pause.OFFLINE -> listOf("Best available" to "bestAvail")
-                Pause.BALANCE -> listOf("Add data" to "addData"); else -> listOf("Add funds" to "addData")
+                Pause.BALANCE -> listOf("Add data" to "addData")
+                else -> if (balanceLow()) listOf("Add funds" to "addData") else listOf("Disconnect" to "disconnect")
             })
         }
     }

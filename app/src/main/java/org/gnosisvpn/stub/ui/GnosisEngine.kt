@@ -8,8 +8,6 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** How long after a failed PIX payment the app keeps saying so, while the core retries. */
-private const val PAY_FAIL_HOLD_S = 180.0
 
 /**
  * The app's engine: every screen shows what the Gnosis VPN core reports through [Tunnel].
@@ -39,12 +37,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
     private var session: Tunnel.Session? = null
     private var lastBought: Long? = null
     private var lastPayFail = false
-    /**
-     * When (engine time) a PIX payment for this connection last failed. After a failed payment the
-     * core ends the exit's hold and reconnects, so the session alone flips between reconnecting
-     * and connected. This keeps the app on "Couldn't pay for data" until a payment goes through.
-     */
-    private var payFailAt: Double? = null
+    override val awaitingPayment: Boolean
+        get() = session?.awaitingPayment == true && conn == Conn.CONNECTED
+    override val paymentFailed: Boolean get() = session?.payment == Tunnel.Payment.FAILED
     private var rx: Pair<Double, Double>? = null
     private var lastCounters: Tunnel.Stats? = null
     private var lastCountersAt = 0L
@@ -194,14 +189,16 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         val s = tn.session?.takeIf { st != Tunnel.State.DISCONNECTED && st != Tunnel.State.DISCONNECTING }
         session = s
         if (st != lastState) {
-            if (st == Tunnel.State.ERROR && lastState != null) { conn = Conn.IDLE; setFlash(Tone.BAD, "Couldn’t connect.", "Try again, or pick another location.") }
+            if (st == Tunnel.State.ERROR && lastState != null) {
+                conn = Conn.IDLE
+                setFlash(Tone.BAD, "Couldn’t connect to ${ex(loc).city}.", tn.lastError ?: "Try again, or pick another location.")
+            }
             if (st == Tunnel.State.CONNECTED) runCatching { org.gnosisvpn.stub.App.instance.readLockdown() }.getOrNull()?.let { lockdown = it; alwaysOn = alwaysOn || it }
             lastState = st
         }
         when {
             st == Tunnel.State.DISCONNECTED || st == Tunnel.State.ERROR -> {
                 if (conn != Conn.IDLE) { conn = Conn.IDLE; pause = null; offConfirm = false; nextCheck = t + 20; sessionStart = null }
-                payFailAt = null
             }
             st == Tunnel.State.DISCONNECTING -> {}
             s == null -> if (conn != Conn.CONNECTING) { conn = Conn.CONNECTING; cStart = now(); cDur = 60_000 }   // waiting for the core
@@ -223,17 +220,15 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                     lastBought = bought
                 }
                 val reachable = e.routable && !e.offline
-                if (s.payment == Tunnel.Payment.FAILED) payFailAt = t
-                else if (s.payment == Tunnel.Payment.FUNDED && !s.awaitingPayment) payFailAt = null
-                val payFailing = payFailAt?.let { t - it < PAY_FAIL_HOLD_S } == true
                 val newConn = when {
-                    s.reconnecting && !reachable -> Conn.PAUSED
-                    // Paused only while the exit actually holds traffic (or the core reconnects after
-                    // ending the hold); with data still flowing it stays connected, with a flash.
-                    payFailing && (s.awaitingPayment || s.reconnecting) -> Conn.PAUSED
-                    s.reconnecting -> Conn.RECONNECTING
+                    s.reconnecting -> if (!reachable) Conn.PAUSED else Conn.RECONNECTING
                     s.step != null && s.step < s.steps - 1 && !s.stalled && tn.state != Tunnel.State.CONNECTED -> Conn.CONNECTING
                     s.awaitingPayment && (wallet?.trafficLevel == Tunnel.Level.EMPTY) -> Conn.PAUSED
+                    // The exit holds traffic until it sees the payment on chain (about 2-3 min on a
+                    // connection's first payment, when the block becomes final): the tunnel is up, so
+                    // this is connected-and-waiting, even after a failed payment (the core retries it).
+                    // Never paused or reconnected for it: a new session restarts the payment (gvpndows).
+                    s.awaitingPayment -> Conn.CONNECTED
                     s.stalled -> Conn.RECONNECTING
                     else -> Conn.CONNECTED
                 }
@@ -261,7 +256,8 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                 if (conn == Conn.CONNECTED && a in 0.01..(chunk * 0.04) && wallet?.trafficLevel == Tunnel.Level.EMPTY)
                     fire("u6:$allocN", Note("u6", "Internet pauses soon", "About ${a.roundToInt()} MB of data left at ${e.city}.", listOf("Add data" to "addData", "Close" to "nclose")))
                 val payFail = s.payment == Tunnel.Payment.FAILED
-                if (payFail && !lastPayFail && conn == Conn.CONNECTED) setFlash(Tone.WARN, "Couldn’t buy more data yet.", "Your VPN balance may be too low. Gnosis VPN keeps trying.")
+                if (payFail && !lastPayFail && conn == Conn.CONNECTED && !s.awaitingPayment) setFlash(Tone.WARN, "Payment for more data failed.",
+                    (if (left() > 0) "You can keep browsing on the ${mb(left())} left here. " else "") + "Gnosis VPN keeps retrying the payment.")
                 lastPayFail = payFail
             }
         }

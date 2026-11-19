@@ -38,7 +38,10 @@ App (`app/src/main/java/org/gnosisvpn/stub/`):
 Rust and build:
 
 - `rust/gnosis_vpn-android/`: the JNI bridge crate (plays the desktop root process for the
-  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client 7d745df (main after v1.0.0; `CLIENT_REV` in `scripts/do-build/run.sh`).
+  core); `rust/patches/0001-android-target.patch`: Android support for gnosis_vpn-client 7d745df (main after v1.0.0; `CLIENT_REV` in `scripts/do-build/run.sh`),
+  plus newer HOPR dependencies in its Cargo.toml/Cargo.lock: hopr-strategy 9.2.0 (curvy-sdk 0.2.2:
+  the Curvy shield fixes that end the PIX payment loop), hoprnet master ff0076ef, edgli main 6455a823,
+  the same as gvpndows.
 - `scripts/do-build/`: builds on throwaway DigitalOcean droplets: the Rust core (`run.sh`) and the app (`app.sh`).
 - `scripts/gnosis-assets.sh`: copies the client package's data files into the APK's assets.
 - `scripts/build.sh`: memory-guarded build, lint, unit tests, then `scripts/check-apk.sh`

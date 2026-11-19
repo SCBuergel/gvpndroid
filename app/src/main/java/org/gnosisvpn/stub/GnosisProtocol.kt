@@ -78,8 +78,49 @@ object GnosisProtocol {
             checking = qp?.optString("type") == "checking",
             problem = rh.optString("last_error").takeIf { it.isNotEmpty() && it != "null" }
                 ?: qp?.takeIf { it.optString("type") == "failed" }?.optString("error"),
+            why = if (state == "routable") null else whyNot(rh),
         )
     }
+
+    /**
+     * Why an exit can't be reached, in words, from its route health: the full DestinationStatus
+     * route_health (state, walk, last_error, quick_probe) or just a RouteHealthState (a connect
+     * reply). The same wording as gvpndows.
+     */
+    fun whyNot(rh: JSONObject?): String {
+        val st = rh?.optJSONObject("state") ?: rh?.takeIf { it.has("type") }
+        val reason = st?.optJSONObject("reason")
+        val walk = rh?.optJSONObject("walk")
+        fun str(o: JSONObject?, k: String) = o?.optString(k)?.takeIf { it.isNotEmpty() && it != "null" }
+        val qp = rh?.optJSONObject("quick_probe")
+        val text = when (st?.optString("type")) {
+            "unrecoverable" -> when (val t = reason?.optString("type")) {
+                "not_allowed" -> "This exit needs a route type the app does not allow."
+                "incompatible_api_version" -> "This exit runs a version this app cannot talk to."
+                "cannot_open_session" -> "The exit refused the session: ${str(reason, "error") ?: "no reason given"}."
+                else -> "The exit cannot be used ($t)."
+            }
+            "not_routable" -> when (walk?.optString("type")) {
+                "not_announced" -> "The exit has not announced itself on the network, so there is no way to reach it."
+                "no_path" -> "No relay path to the exit right now (${walk.optInt("forward_count")} forward, ${walk.optInt("return_count")} return)."
+                else -> "There is no route to this exit right now."
+            }
+            else -> "The exit did not answer the connection attempt."
+        }
+        val last = str(rh, "last_error") ?: str(qp?.optJSONObject("last"), "error") ?: str(qp, "error")
+        return if (last != null) "$text Last error: $last" else text
+    }
+
+    /** Why the core refused a connect, in words, or null when it took it (connecting, waiting, already connected). */
+    fun connectRefusal(reply: String?): String? {
+        if (reply.isNullOrEmpty()) return "The Gnosis VPN core did not answer."
+        val o = runCatching { JSONObject(reply) }.getOrNull() ?: return null
+        str(o, "error")?.let { return it }
+        val d = statusData(reply) ?: o
+        return if (d.optString("type") == "unable_to_connect") whyNot(d.optJSONObject("route_health")) else null
+    }
+
+    private fun str(o: JSONObject, k: String) = o.takeIf { it.has(k) && !it.isNull(k) }?.optString(k)?.takeIf { it.isNotEmpty() }
 
     /** The connect phases in order (ConnectPhase), with readable names. */
     val CONNECT_PHASES = listOf(
@@ -88,6 +129,8 @@ object GnosisProtocol {
         "establish_wg_tunnel" to "Securing the tunnel", "verify_ping" to "Checking the tunnel", "adjust_to_main" to "Moving to the main route",
         "connection_established" to "Connected",
     )
+
+    private val CARRYING = setOf("verify_ping", "adjust_to_main", "connection_established")
 
     /** The session from a status `data` object (connection), or null while disconnected. */
     fun session(data: JSONObject): Tunnel.Session? {
@@ -101,7 +144,9 @@ object GnosisProtocol {
         fun long(o: JSONObject?, k: String) = o?.takeIf { it.has(k) && !it.isNull(k) }?.optLong(k)
         return Tunnel.Session(
             exitId = c.optString("destination"), sinceMs = c.optLong("since"),
-            step = if (type == "connected") CONNECT_PHASES.size - 1 else idx, steps = CONNECT_PHASES.size, stepName = idx?.let { CONNECT_PHASES[it].second },
+            // From verify_ping on the tunnel and its routes carry traffic; the core only checks the
+            // exit's ping and tunes the session. Shown as connected (as gvpndows does).
+            step = if (type == "connected" || (type == "connecting" && phase in CARRYING)) CONNECT_PHASES.size - 1 else idx, steps = CONNECT_PHASES.size, stepName = idx?.let { CONNECT_PHASES[it].second },
             pingMs = long(c, "tunnel_ping_rtt")?.toInt(),
             chunkBytes = long(pix, "chunk_bytes"), bytesLeft = long(pix, "bytes_left"), bytesSpent = long(pix, "bytes_spent"),
             bytesBought = long(pix, "bytes_bought"), cost = pix?.optString("cost")?.let { token(it) },

@@ -139,6 +139,8 @@ class FakeTunnel : org.gnosisvpn.stub.Tunnel {
     override var session: org.gnosisvpn.stub.Tunnel.Session? = null
     override var chunkBytes: Long? = 660_160_512
     override var wallet: org.gnosisvpn.stub.Tunnel.Wallet? = null
+    var lastErrorText: String? = null
+    override val lastError: String? get() = lastErrorText
     var counters: org.gnosisvpn.stub.Tunnel.Stats? = null
     val selected = mutableListOf<String>()
     override fun connect() { state = org.gnosisvpn.stub.Tunnel.State.CONNECTING }
@@ -254,40 +256,6 @@ class GnosisEngineTest {
         assertEquals("500 MB left · more than a day", e.ongoingNote()!!.body)
     }
 
-    @Test fun failedPaymentHasNoInventedCountdown() {
-        val (tn, e, _) = setup()
-        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
-        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 0, stalled = true, awaitingPayment = true, payment = T.Payment.FAILED)
-        e.tick()
-        assertEquals(Pause.RENEWFAIL, e.pause)
-        val m = e.moments().first()
-        assertEquals("Couldn’t pay for data.", m.lead)
-        assertTrue(m.text, m.text.startsWith("Your VPN balance may be too low. Gnosis VPN keeps trying.")); assertFalse(m.text.contains("{retry}"))
-        assertEquals(listOf("Add funds" to "addData"), m.btns)
-        assertEquals("Your VPN balance may be too low.", e.simpleLine(m).text)
-        assertEquals(listOf("Add funds" to "addData"), e.simpleLine(m).btns)
-    }
-
-    /** The phone on 2026-11-18: the PIX payment fails, the core reconnects, connects, fails again. */
-    @Test fun failedPaymentStaysVisibleThroughTheCoresReconnects() {
-        val (tn, e, _) = setup()
-        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
-        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, stalled = true, awaitingPayment = true, payment = T.Payment.FAILED)
-        e.tick(); assertEquals(Pause.RENEWFAIL, e.pause)
-        tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick()
-        assertEquals("still a payment problem, not a plain reconnect", Conn.PAUSED, e.conn); assertEquals(Pause.RENEWFAIL, e.pause)
-        assertEquals("Couldn’t pay for data; your balance may be too low. Traffic stays blocked.", e.ongoingNote()!!.body)
-        // back on the exit's free allowance: traffic flows, so the app says connected
-        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, payment = T.Payment.PENDING); e.tick()
-        assertEquals(Conn.CONNECTED, e.conn)
-        // the exit holds traffic again while the failure is recent: paused, without a new FAILED report
-        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, stalled = true, awaitingPayment = true, payment = T.Payment.PENDING); e.tick()
-        assertEquals(Conn.PAUSED, e.conn); assertEquals(Pause.RENEWFAIL, e.pause)
-        // a payment goes through: connected again
-        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 600_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED); e.tick()
-        assertEquals(Conn.CONNECTED, e.conn); assertNull(e.pause)
-    }
-
     @Test fun failedRenewalWithDataLeftStaysConnected() {
         val (tn, e, _) = setup()
         tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
@@ -296,8 +264,62 @@ class GnosisEngineTest {
         tn.session = tn.session!!.copy(payment = T.Payment.FAILED); e.tick()
         assertEquals("data still flows: not paused", Conn.CONNECTED, e.conn); assertNull(e.pause)
         val m = e.moments().first()
-        assertEquals("Couldn’t buy more data yet.", m.lead)
+        assertEquals("Payment for more data failed.", m.lead)
+        assertEquals("You can keep browsing on the 300 MB left here. Gnosis VPN keeps retrying the payment.", m.text)
+        assertEquals("You can keep browsing on the 300 MB left here.", e.simpleLine(m).text)
         assertTrue(e.ongoingNote()!!.title.startsWith("Connected"))
+    }
+
+    /** The phone on 2026-11-18: payment failed during the hold, the core retried. Matches gvpndows. */
+    @Test fun failedPaymentDuringTheHoldStaysConnectedAndWaiting() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 0, stalled = true, awaitingPayment = true, payment = T.Payment.FAILED)
+        e.tick()
+        assertEquals(Conn.CONNECTED, e.conn); assertNull(e.pause)
+        val m = e.moments().first()
+        assertEquals("Waiting for ${e.ex(e.loc).city} to see your payment.", m.lead)
+        assertEquals("The last payment failed; Gnosis VPN retries it automatically. Traffic resumes by itself.", m.text)
+        assertNull("balance is fine: no Add funds", m.btns)
+        assertTrue(e.ongoingNote()!!.title.startsWith("Connected"))
+        // the core reconnects: shown as such, then connected again
+        tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick(); assertEquals(Conn.RECONNECTING, e.conn)
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, payment = T.Payment.PENDING); e.tick(); assertEquals(Conn.CONNECTED, e.conn)
+    }
+
+    @Test fun lowBalanceDuringTheHoldOffersFunds() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("5", T.Level.LOW); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 0, stalled = true, awaitingPayment = true, payment = T.Payment.FAILED)
+        e.tick()
+        assertTrue(e.balanceLow())
+        val m = e.moments().first()
+        assertTrue(m.text, m.text.endsWith("Your balance is low."))
+        assertEquals(listOf("Add funds" to "addData"), m.btns)
+    }
+
+    @Test fun refusedConnectSaysWhy() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); e.tick()
+        e.act("connect"); tn.state = T.State.CONNECTING; e.tick()
+        tn.lastErrorText = "No relay path to the exit right now (0 forward, 2 return)."; tn.state = T.State.ERROR; e.tick()
+        val m = e.moments().first()
+        assertEquals("Couldn’t connect to ${e.ex(e.loc).city}.", m.lead)
+        assertEquals("No relay path to the exit right now (0 forward, 2 return).", m.text)
+    }
+
+    @Test fun paymentHoldIsWaitingNotReconnecting() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger()); tn.wallet = wallet("54"); tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, stalled = true, awaitingPayment = true, payment = T.Payment.PENDING)
+        e.tick()
+        assertEquals(Conn.CONNECTED, e.conn); assertTrue(e.awaitingPayment)
+        val m = e.moments().first()
+        assertEquals("Waiting for ${e.ex(e.loc).city} to see your payment.", m.lead)
+        assertFalse(m.text.contains("isn’t protected"))
+        // the hold ends: plain connected
+        tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 600_000_000, payment = T.Payment.FUNDED); e.tick()
+        assertFalse(e.awaitingPayment)
     }
 
     @Test fun startupShowsTheCoresIssueInsteadOfTheStep() {
@@ -323,8 +345,9 @@ class GnosisEngineTest {
         tn.session = T.Session("0xe5cE", 1, step = 9, steps = 10, bytesLeft = 0, stalled = true, awaitingPayment = true, payment = T.Payment.PENDING)
         e.tick()
         assertEquals("S14", e.screenCode().first)
+        // with funds again, a failed payment during the hold is not a pause: connected, waiting (gvpndows)
         tn.wallet = wallet("10"); tn.session = tn.session!!.copy(payment = T.Payment.FAILED); e.tick()
-        assertEquals("S16", e.screenCode().first)
+        assertEquals(Conn.CONNECTED, e.conn)
         // the exit went away while reconnecting
         tn.locations = listOf(ger().copy(health = ger().health!!.copy(reachable = false, unrecoverable = true)), uk())
         tn.session = T.Session("0xe5cE", 1, reconnecting = true); e.tick()

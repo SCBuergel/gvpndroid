@@ -56,6 +56,10 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     @Volatile override var startup: Tunnel.Startup? = null; private set
     @Volatile override var failure: String? = null; private set
+    /** Why the last connect failed (the core refused it or gave up), in words; cleared on connect. */
+    @Volatile override var lastError: String? = null; private set
+    /** True while connectWhenReady is issuing Connect: a "disconnected" then is not the core giving up. */
+    @Volatile private var connectLoop = false
     @Volatile override var session: Tunnel.Session? = null; private set
     @Volatile override var chunkBytes: Long? = null; private set
     @Volatile override var wallet: Tunnel.Wallet? = null; private set
@@ -90,6 +94,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     override fun connect() {
         if (state == Tunnel.State.CONNECTING || state == Tunnel.State.CONNECTED) return
         wantConnected = true
+        lastError = null
         set(Tunnel.State.CONNECTING, null)
         worker.execute {
             try {
@@ -213,6 +218,7 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     private fun statusLoop() {
         var lastRun = ""
         var lastConn = ""
+        var lastConnType = ""
         var lastDests = ""
         while (true) {
             if (!coreRunning) { Thread.sleep(2_000); continue }
@@ -232,6 +238,12 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 val connObj = data.optJSONObject("connection")
                 val conn = if (level != LogLevel.NORMAL) short(connObj?.toString() ?: "?", 400) else connObj?.optString("type") ?: "?"
                 if (conn != lastConn) { LogBuffer.log("gnosis: connection $conn"); lastConn = conn }
+                // The core gave up on an attempt (back to disconnected while the user still wants
+                // the VPN and no Connect is being sent): say why instead of waiting forever.
+                val connType = connObj?.optString("type") ?: ""
+                if (wantConnected && !connectLoop && connType == "disconnected" && lastConnType in setOf("connecting", "reconnecting"))
+                    worker.execute { giveUp(target?.let { find(it) }?.health?.why ?: "The exit did not answer the connection attempt.") }
+                lastConnType = connType
                 destinations = GnosisProtocol.destinations(data)
                 startup = GnosisProtocol.startup(data)
                 failure = GnosisProtocol.failure(data)
@@ -256,6 +268,11 @@ class GnosisTunnel(private val context: Context) : Tunnel {
 
     /** Retries Connect until the core accepts it, for the current [target]. */
     private fun connectWhenReady() {
+        connectLoop = true
+        try { connectLoopBody() } finally { connectLoop = false }
+    }
+
+    private fun connectLoopBody() {
         var waitedFor = ""
         while (wantConnected && state == Tunnel.State.CONNECTING) {
             val wanted = target ?: return
@@ -267,12 +284,28 @@ class GnosisTunnel(private val context: Context) : Tunnel {
                 LogBuffer.log("gnosis: connect $id -> $type")
                 if (type in GnosisProtocol.CONNECT_ACCEPTED) return
                 LogBuffer.log("gnosis: connect reply ${short(reply, 600)}")
+                // A refusal (unable to connect, or an error) is said at once instead of retried
+                // forever; the user picks another exit or tries again (as gvpndows does).
+                val why = GnosisProtocol.connectRefusal(reply)
+                if (why != null) {
+                    giveUp(find(wanted)?.health?.why?.takeIf { type == "unable_to_connect" } ?: why)
+                    return
+                }
             } else {
                 val why = if (runMode != "running") "core is ${runMode ?: "starting"}" else "location $wanted not discovered yet"
                 if (why != waitedFor) { LogBuffer.log("gnosis: waiting to connect: $why"); waitedFor = why }
             }
             Thread.sleep(3_000)
         }
+    }
+
+    /** Ends a connect attempt the core refused or gave up on: idle, with [why] for the UI. */
+    private fun giveUp(why: String) {
+        LogBuffer.log("gnosis: connect ended without a connection: $why")
+        lastError = why
+        wantConnected = false
+        closeTun(stopService = true)
+        set(Tunnel.State.ERROR, why)
     }
 
     /** Core events (tun requests, start/stop) and the core's log lines for the screen. */

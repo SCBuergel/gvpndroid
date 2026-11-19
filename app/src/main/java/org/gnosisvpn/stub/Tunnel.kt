@@ -9,6 +9,8 @@ package org.gnosisvpn.stub
  * UI can show them when a backend offers them without knowing which backend it talks to.
  */
 interface Tunnel {
+    /** Why the last connect attempt failed, in words, for the UI; null when there is nothing to say. */
+    val lastError: String? get() = null
     enum class State { DISCONNECTED, CONNECTING, CONNECTED, DISCONNECTING, ERROR }
 
     data class Stats(val rxBytes: Long, val txBytes: Long, val lastHandshakeEpochMs: Long?)
@@ -27,6 +29,8 @@ interface Tunnel {
         val pingMs: Int? = null, val checkedAtMs: Long? = null, val slotsTotal: Int? = null, val slotsFree: Int? = null,
         val load: Double? = null, val pathValue: Double? = null, val firstRelays: Int? = null, val checking: Boolean = false,
         val problem: String? = null,
+        /** Why the exit can't be reached right now, in words (from its route health); null when it can. */
+        val why: String? = null,
     )
 
     /** The live session as the backend reports it (data bought in chunks, paid from the wallet). */

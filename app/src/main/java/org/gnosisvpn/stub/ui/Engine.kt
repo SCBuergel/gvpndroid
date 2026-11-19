@@ -175,6 +175,12 @@ open class Engine {
     open fun rates(): Pair<Double, Double>? = null
     /** The balance is known (the backend reported it); unknown counts as enough. */
     open val balanceKnown: Boolean get() = true
+    /** The balance is known to cover at most one more block of data: only then is "Add funds" the fix. */
+    fun balanceLow(): Boolean = balanceKnown && balance <= chunk
+    /** Connected, and the exit holds traffic until it sees this connection's payment on chain (not a failure). */
+    open val awaitingPayment: Boolean get() = false
+    /** The session's last payment failed (the core retries it). */
+    open val paymentFailed: Boolean get() = false
     /** Too little balance for another chunk (and the backend said so). */
     fun short() = balanceKnown && balance < chunk
     /** The balance as shown (data, or tokens while the data estimate is unknown). */
