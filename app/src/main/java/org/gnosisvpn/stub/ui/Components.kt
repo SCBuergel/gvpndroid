@@ -1,5 +1,7 @@
 package org.gnosisvpn.stub.ui
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -167,7 +169,9 @@ fun Btn(
 fun IB(name: String, label: String, onClick: () -> Unit, fill: Boolean = false, tint: Color = Color.Unspecified, badge: Boolean = false, small: Boolean = false) {
     val p = LocalPal.current
     Tip(label) {
-        IconButton(onClick = onClick, modifier = Modifier.size(if (small) 40.dp else 48.dp)) {
+        // The tooltip does not name its anchor: the label is also the button's name for TalkBack
+        // (the icon has none, so it is announced once).
+        IconButton(onClick = onClick, modifier = Modifier.size(if (small) 40.dp else 48.dp).semantics { contentDescription = label }) {
             Box {
                 Ms(name, fill = fill, size = if (small) 20.dp else 24.dp, tint = if (tint == Color.Unspecified) p.onV else tint)
                 if (badge) Box(Modifier.align(Alignment.TopEnd).offset(x = 2.dp, y = (-2).dp).size(8.dp).background(p.err, CircleShape).border(2.dp, p.bg, CircleShape))
