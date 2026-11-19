@@ -44,6 +44,27 @@ class R3_4TunnelSequenceTest {
         assertEquals(1, posted.count { it == Tunnel.State.DISCONNECTED })
     }
 
+    @Test fun aPostedDisconnectedIsJudgedByTheStateNow() {
+        seq.connect(); runAll()
+        seq.disconnect(); seq.connect()
+        // the DOWN task's change as it would have been posted, while the tunnel is CONNECTING
+        val tunnel = FakeState(seq)
+        assertFalse(serviceStops(stateNow(tunnel, Tunnel.State.DISCONNECTED)))
+        runAll()
+        assertFalse(serviceStops(stateNow(tunnel, Tunnel.State.DISCONNECTED)))   // CONNECTED now
+        assertTrue(serviceStops(stateNow(null, Tunnel.State.DISCONNECTED)))      // no tunnel to ask
+    }
+
+    /** Only [Tunnel.state] is read; the rest is unused. */
+    private class FakeState(private val seq: TunnelSequence) : Tunnel {
+        override val state get() = seq.state
+        override fun connect() {}
+        override fun disconnect() {}
+        override fun stats(): Tunnel.Stats? = null
+        override fun addListener(listener: Tunnel.Listener) {}
+        override fun removeListener(listener: Tunnel.Listener) {}
+    }
+
     @Test fun serviceStopsOnTheCurrentStateOnly() {
         assertTrue(serviceStops(Tunnel.State.DISCONNECTED))
         assertTrue(serviceStops(Tunnel.State.ERROR))

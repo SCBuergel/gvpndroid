@@ -20,7 +20,7 @@ class TunnelService : Service() {
 
     // Decides on the tunnel's state now, not the posted one: a connect may have followed it.
     private val listener = Tunnel.Listener { posted, _ ->
-        val now = subscription?.tunnel?.state ?: posted
+        val now = stateNow(subscription?.tunnel, posted)
         if (serviceStops(now)) {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -127,6 +127,9 @@ internal class Subscription(val tunnel: Tunnel, private val listener: Tunnel.Lis
     init { tunnel.addListener(listener) }
     fun cancel() = tunnel.removeListener(listener)
 }
+
+/** The state a posted change is judged by: the [tunnel]'s current one ([posted] once it is gone). */
+internal fun stateNow(tunnel: Tunnel?, posted: Tunnel.State) = tunnel?.state ?: posted
 
 /** Whether TunnelService stops on a state change, judged by the tunnel's [current] state. */
 internal fun serviceStops(current: Tunnel.State) = current == Tunnel.State.DISCONNECTED || current == Tunnel.State.ERROR
