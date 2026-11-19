@@ -93,9 +93,7 @@ class TunnelService : Service() {
                 .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true).setCategory(Notification.CATEGORY_SERVICE)
             val acts = note?.acts ?: listOf("Disconnect" to "disconnect")
             acts.forEachIndexed { i, (label, a) ->
-                val pi = PendingIntent.getBroadcast(ctx, 50 + i,
-                    Intent(ctx, org.gnosisvpn.stub.ui.NotificationActionReceiver::class.java).putExtra("note", "ongoing").putExtra("act", a),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+                val pi = org.gnosisvpn.stub.ui.Notifier.actionIntent(ctx, "ongoing", a, 50 + i)
                 b.addAction(Notification.Action.Builder(null, label, pi).build())
             }
             return b.build()

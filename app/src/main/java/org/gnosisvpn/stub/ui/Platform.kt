@@ -35,9 +35,22 @@ object Notifier {
     private fun openApp(ctx: Context) = PendingIntent.getActivity(ctx, 0,
         Intent(ctx, UiActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-    private fun actionIntent(ctx: Context, noteId: String, act: String, req: Int) = PendingIntent.getBroadcast(ctx, req,
+    private fun broadcast(ctx: Context, noteId: String, act: String, req: Int) = PendingIntent.getBroadcast(ctx, req,
         Intent(ctx, NotificationActionReceiver::class.java).putExtra("note", noteId).putExtra("act", act),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    /**
+     * A notification action button. One that needs the app's screen opens UiActivity directly:
+     * since Android 12 a receiver reached from a notification may not start an activity. The
+     * activity runs it once (NoteTaps); the others stay broadcasts to NotificationActionReceiver.
+     */
+    fun actionIntent(ctx: Context, noteId: String, act: String, req: Int): PendingIntent =
+        if (!NoteTaps.needsUi(act, android.net.VpnService.prepare(ctx) != null)) broadcast(ctx, noteId, act, req)
+        else {
+            NoteTaps.arm(noteId, act)
+            PendingIntent.getActivity(ctx, req, NoteTaps.put(Intent(ctx, UiActivity::class.java), noteId, act).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        }
 
     fun idOf(noteId: String) = noteId.hashCode() and 0x7fffffff or 0x100
 
@@ -48,7 +61,7 @@ object Notifier {
             .setSmallIcon(R.drawable.ic_vpn_key).setContentTitle(n.title).setContentText(n.body)
             .setStyle(Notification.BigTextStyle().bigText(n.body))
             .setContentIntent(openApp(ctx)).setAutoCancel(true).setCategory(Notification.CATEGORY_STATUS)
-            .setDeleteIntent(actionIntent(ctx, n.id, "gone", idOf(n.id) + 1))
+            .setDeleteIntent(broadcast(ctx, n.id, "gone", idOf(n.id) + 1))
         n.acts.filter { it.second != "nclose" }.forEachIndexed { i, (label, a) ->
             b.addAction(Notification.Action.Builder(null as Icon?, label, actionIntent(ctx, n.id, a, idOf(n.id) + 2 + i)).build())
         }
@@ -59,20 +72,44 @@ object Notifier {
 
 }
 
-/** Taps on notification actions (and swipes, "gone") go to the engine. */
+/** Taps on notification actions without UI (and swipes, "gone") go to the engine. */
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         val eng = App.instance.engine
         val noteId = intent.getStringExtra("note") ?: return
         val a = intent.getStringExtra("act") ?: return
-        eng.notes.firstOrNull { it.id == noteId }?.gone = true
-        if (a != "gone") {
-            if (noteId != "ongoing") Notifier.cancel(ctx, noteId)
-            // Actions that open a page need the app in front.
-            if (a in setOf("addData", "lockOn", "fundScreen")) ctx.startActivity(Intent(ctx, UiActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-            eng.act(a)
-        } else eng.emit()
+        if (a != "gone") tapped(ctx, noteId, a) else { eng.notes.firstOrNull { it.id == noteId }?.gone = true; eng.emit() }
     }
+
+    companion object {
+        /** A notification action was tapped: the note is done, then the engine runs the action. */
+        fun tapped(ctx: Context, noteId: String, act: String) {
+            val eng = App.instance.engine
+            eng.notes.firstOrNull { it.id == noteId }?.gone = true
+            if (noteId != "ongoing") Notifier.cancel(ctx, noteId)
+            eng.act(act)
+        }
+    }
+}
+
+/**
+ * Notification actions that open UiActivity. Posting one arms it here, in the process; the
+ * activity takes it once. A recreated activity, a task restored from recents or a new process
+ * finds nothing armed, so the intent cannot replay the action.
+ */
+object NoteTaps {
+    /** Actions that show a page, and connects that may have to ask for VPN consent. */
+    private val UI = setOf("addData", "lockOn", "fundScreen")
+    private val CONNECTS = setOf("renew", "bestAvail")
+    private val armed = HashSet<String>()
+
+    fun needsUi(act: String, needsConsent: Boolean) = act in UI || (needsConsent && act in CONNECTS)
+    @Synchronized fun arm(noteId: String, act: String) { armed += "$noteId/$act" }
+    /** The (note, action) [put] into this intent, if armed; disarms it. */
+    @Synchronized fun take(note: String?, act: String?): Pair<String, String>? =
+        if (note != null && act != null && armed.remove("$note/$act")) note to act else null
+    fun put(i: Intent, noteId: String, act: String): Intent = i.putExtra("tapNote", noteId).putExtra("tapAct", act)
+    fun take(i: Intent?): Pair<String, String>? = take(i?.getStringExtra("tapNote"), i?.getStringExtra("tapAct"))
 }
 
 class GnosisTileService : TileService() {

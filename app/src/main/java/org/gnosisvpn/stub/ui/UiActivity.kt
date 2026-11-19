@@ -25,8 +25,31 @@ import org.gnosisvpn.stub.MainActivity
 import org.gnosisvpn.stub.R
 import org.gnosisvpn.stub.TunnelService
 
+/** What the engine's hooks need from the app's screen. */
+interface UiFront {
+    /** At least started: only then may it start activities (settings, browser, share sheet). */
+    val started: Boolean
+    fun openVpnSettings(): Boolean
+    fun openUrl(url: String)
+    fun share(text: String)
+    fun copy(label: String, text: String)
+    fun startLogExport()
+    fun requestTile()
+    fun connectVpn()
+}
+
 /** The app's screen: the Compose UI over the engine (App.engine). */
-class UiActivity : ComponentActivity() {
+class UiActivity : ComponentActivity(), UiFront {
+    override val started get() = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+    /** A notification action that opened this screen, run once the screen is in front. */
+    private var tap: Pair<String, String>? = null
+
+    /** Takes the notification action [intent] carries, once (NoteTaps), and the note is done. */
+    private fun takeTap(intent: Intent?) {
+        val t = NoteTaps.take(intent) ?: return
+        setIntent(Intent(this, UiActivity::class.java))
+        tap = t
+    }
     private val exportLogs = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri -> uri?.let { writeLogs(it) } }
     private val vpnConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) TunnelService.start(this, TunnelService.ACTION_CONNECT)
@@ -34,7 +57,7 @@ class UiActivity : ComponentActivity() {
     }
 
     /** Asks for Android's VPN consent the first time, then starts the tunnel. */
-    fun connectVpn() {
+    override fun connectVpn() {
         val consent = android.net.VpnService.prepare(this)
         if (consent == null) TunnelService.start(this, TunnelService.ACTION_CONNECT) else vpnConsent.launch(consent)
     }
@@ -44,6 +67,8 @@ class UiActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val app = App.instance
         app.activity = this
+        // Not on a recreation or a launch from recents: the action already ran, or its process is gone.
+        if (savedInstanceState == null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) takeTap(intent)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         val debug = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -63,6 +88,7 @@ class UiActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        takeTap(intent)
         if (pendingConnect.take()) connectVpn()
     }
 
@@ -77,6 +103,7 @@ class UiActivity : ComponentActivity() {
         // Back from Android's VPN settings: read what the user changed there.
         val eng = App.instance.engine
         if (eng.takeSysReturn()) App.instance.readLockdown()?.let { eng.sysVpnReturned(it); eng.emit() }
+        tap?.let { (note, act) -> tap = null; NotificationActionReceiver.tapped(this, note, act) }
     }
 
     override fun onDestroy() {
@@ -85,18 +112,18 @@ class UiActivity : ComponentActivity() {
     }
 
     /** Opens Android's VPN settings; false (with a toast) if there are none. */
-    fun openVpnSettings() =
+    override fun openVpnSettings() =
         runCatching { startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }.onFailure { toast("VPN settings are not available on this device.") }.isSuccess
 
     fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
-    fun openUrl(url: String) = runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("No browser to open $url") }
+    override fun openUrl(url: String) { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("No browser to open $url") } }
 
-    fun share(text: String) = startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share your VPN address"))
+    override fun share(text: String) = startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share your VPN address"))
 
-    fun copy(label: String, text: String) = getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
+    override fun copy(label: String, text: String) = getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, text))
 
-    fun startLogExport() = runCatching { exportLogs.launch("gnosis-vpn-logs.txt") }.onFailure { toast("No file picker on this device.") }
+    override fun startLogExport() { runCatching { exportLogs.launch("gnosis-vpn-logs.txt") }.onFailure { toast("No file picker on this device.") } }
 
     private fun writeLogs(uri: Uri) {
         runCatching {
@@ -106,7 +133,7 @@ class UiActivity : ComponentActivity() {
         }.onSuccess { App.instance.ui.showSnack("Logs saved.") }.onFailure { App.instance.ui.showSnack("Couldn’t save the logs: ${it.message}") }
     }
 
-    fun requestTile() {
+    override fun requestTile() {
         if (Build.VERSION.SDK_INT >= 33) {
             getSystemService(StatusBarManager::class.java).requestAddTileService(
                 GnosisTileService.component(this), "Gnosis VPN", Icon.createWithResource(this, R.drawable.ic_vpn_key), mainExecutor,
@@ -118,19 +145,24 @@ class UiActivity : ComponentActivity() {
     }
 }
 
-/** The engine's hooks into Android: snackbars, notifications, links, clipboard, share, files. */
-class AppHooks(private val ctx: Context) : EngineHooks {
+/**
+ * The engine's hooks into Android: snackbars, notifications, links, clipboard, share, files.
+ * Activities start only from a screen that is at least started: a stopped one's starts are
+ * blocked without an error, so e.g. the VPN settings would count as opened when nothing opened.
+ */
+class AppHooks(private val ctx: Context, private val screen: () -> UiFront? = { App.instance.activity }) : EngineHooks {
     private val app get() = App.instance
+    private fun front() = screen()?.takeIf { it.started }
     override fun snack(msg: String) { if (app.activity != null) app.ui.showSnack(msg) else Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show() }
     override fun notify(note: Note) = Notifier.post(ctx, note)
-    override fun openUrl(url: String) { app.activity?.openUrl(url) }
-    override fun share(text: String) { app.activity?.share(text) }
-    override fun copy(label: String, text: String) { app.activity?.copy(label, text) }
-    override fun openSystemVpnSettings() = app.activity?.openVpnSettings() ?: false
-    override fun exportLogs() { app.activity?.startLogExport() }
-    override fun requestTile() { app.activity?.requestTile() }
+    override fun openUrl(url: String) { front()?.openUrl(url) }
+    override fun share(text: String) { front()?.share(text) }
+    override fun copy(label: String, text: String) { screen()?.copy(label, text) }
+    override fun openSystemVpnSettings() = front()?.openVpnSettings() ?: false
+    override fun exportLogs() { front()?.startLogExport() }
+    override fun requestTile() { front()?.requestTile() }
     override fun connectVpn() {
-        val a = app.activity
+        val a = front()
         when {
             a != null -> a.connectVpn()
             android.net.VpnService.prepare(ctx) == null -> TunnelService.start(ctx, TunnelService.ACTION_CONNECT)
