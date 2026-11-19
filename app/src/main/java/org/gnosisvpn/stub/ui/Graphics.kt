@@ -324,12 +324,19 @@ fun CheckGraphic() {
 /* ---------- live traffic (the demo's visualizer) ---------- */
 class Viz {
     class Ep(val kind: String, val g: DoubleArray, var born: Double, var die: Double? = null, val ph: Double)
-    var eps = mutableListOf<Ep>(); var c: DoubleArray? = null; var last = 0.0; var sent = 0.0; var recv = 0.0; var nextChurn = 0.0
+    var eps = mutableListOf<Ep>(); var c: DoubleArray? = null; var last = 0.0; var nextChurn = 0.0
     var relT0: Double? = null; var dpk = 0.0; var upk = 0.0; var bwAt = 0.0
     var down = 0.0; var up = 0.0; var nRel = 0; var nVpn = 0; var nOth = 0
     private var s = 7L
     fun rand(): Double { s = (s * 16807) % 2147483647; return s / 2147483647.0 }
     val relays: List<DoubleArray> = List(17) { doubleArrayOf(rand() * 100 - 30, rand() * 140 - 40) }
+
+    /** Shows only measured [rates] (Mbit/s down, up); none (off, connecting, paused) reads 0 and keeps the peaks. */
+    fun sample(rates: Pair<Double, Double>?, t: Double) {
+        val (d, u) = rates ?: (0.0 to 0.0)
+        dpk = max(dpk, d); upk = max(upk, u)
+        if (t - bwAt >= .2) { bwAt = t; down = d; up = u }
+    }
 }
 
 val GEO = mapOf("nl" to doubleArrayOf(52.4, 4.9), "at" to doubleArrayOf(48.2, 16.4), "de" to doubleArrayOf(52.5, 13.4), "ch" to doubleArrayOf(46.2, 6.1),
@@ -444,13 +451,7 @@ fun TrafficViz(eng: Engine, viz: Viz, modifier: Modifier = Modifier) {
             val yo = Offset(you[0].toFloat(), you[1].toFloat())
             drawCircle(p.onV, 11f, yo, style = Stroke(1.5f)); drawCircle(p.bg, 8f, yo); drawCircle(p.on, 7f, yo)
             label(tm, "You", yo.x, yo.y + 30, lbl, "middle")
-            val base = if (on) 240 + 90 * sin(t / 3) else 60 + 25 * sin(t / 4); val bb = if (blocked) 0.0 else base
-            viz.recv += ((bb * 1.5 + if (blocked) 0.0 else 60 * viz.rand()) - viz.recv) * min(1.0, dt * .8)
-            viz.sent += ((bb * .42 + if (blocked) 0.0 else 18 * viz.rand()) - viz.sent) * min(1.0, dt * .8)
-            val real = eng.rates()
-            val down = real?.first ?: (viz.recv * 8 / 1000); val up = real?.second ?: (viz.sent * 8 / 1000)
-            viz.dpk = max(viz.dpk, down); viz.upk = max(viz.upk, up)
-            if (t - viz.bwAt >= .2) { viz.bwAt = t; viz.down = down; viz.up = up }
+            viz.sample(eng.rates(), t)
             viz.nRel = nRel; viz.nVpn = nVpn; viz.nOth = nOth
         }
     }
