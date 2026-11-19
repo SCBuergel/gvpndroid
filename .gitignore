@@ -26,3 +26,6 @@ app/src/main/jniLibs/
 
 # Gnosis VPN data files copied from the official package by scripts/gnosis-assets.sh
 app/src/main/assets/gnosis/
+
+# Python bytecode (scripts/test_*.py import the scripts)
+__pycache__/

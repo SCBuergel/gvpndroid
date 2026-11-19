@@ -125,7 +125,7 @@ When a stall or reconnect starts, the app logs the core's connection state and n
   every debug APK, including ones shared by link: whoever has the APK can see the messages' titles
   and timing and post forged messages. The contents stay sealed. Rotate the topic if that matters.
 - Read the logs: `scripts/relay-read.py [SINCE]`, or `-f` to follow. It needs `log-x25519.key`
-  from the same folder.
+  from the same folder. Test: `scripts/test_r6_1_relay_attachment.py`.
 - Removing it: delete those files and the `DEBUG ONLY` blocks, then delete the calls the compiler
   reports.
 
