@@ -6,7 +6,7 @@ with the developer's key. Reads ~/.config/gvpndroid-secrets/{ntfy-topic,log-x255
 ($GVPNDROID_SECRETS overrides the folder). ntfy.sh keeps messages for 12 hours and attachments (backlogs) for 3.
 
 Usage: scripts/relay-read.py [SINCE]   SINCE: ntfy's since= (default 1h; e.g. 30m, 12h, all)
-       scripts/relay-read.py -f        follow: print new parts as they arrive
+       scripts/relay-read.py -f        follow: print new parts as they arrive, reconnecting
 """
 import base64, hashlib, json, os, re, sys, time, urllib.parse, urllib.request, zlib
 
@@ -14,6 +14,7 @@ S = os.environ.get("GVPNDROID_SECRETS", os.path.expanduser("~/.config/gvpndroid-
 TAG = b"gvpndroid-log-v1"
 MAX_LOG = 20_000_000   # a log part never unpacks to more; anyone can post to the topic
 MAX_ATT, ATT_SECS = 3_000_000, 60   # an attachment larger or slower than this is skipped
+FOLLOW_SECS = 120   # -f read timeout: ntfy sends a keepalive about every 45 s, so silence means a dead stream
 
 
 def gunzip(z):
@@ -90,18 +91,43 @@ def show(m, priv):
     print(f"=== {t} {safe(m.get('title', ''))}\n{safe(text)}", flush=True)
 
 
+def follow(topic, since, priv, base="https://ntfy.sh", sleep=time.sleep):
+    """-f: on a dead, failed or closed stream, says so and reconnects after the last message seen."""
+    delay = 2
+    while True:
+        try:
+            with urllib.request.urlopen(f"{base}/{topic}/json?since={urllib.parse.quote(since, safe='')}", timeout=FOLLOW_SECS) as r:
+                for line in r:
+                    delay = 2  # the stream works again
+                    m = json.loads(line)
+                    show(m, priv)
+                    if m.get("event") == "message" and m.get("id"):
+                        since = str(m["id"])
+            why = "stream closed"
+        except (OSError, ValueError) as ex:  # URLError, HTTPError and timeouts are OSErrors
+            why = type(ex).__name__
+        print(f"relay-read: {why}; reconnecting in {delay} s", file=sys.stderr, flush=True)
+        sleep(delay)
+        delay = min(delay * 2, 60)
+
+
 def main():
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
     topic = open(f"{S}/ntfy-topic").read().strip()
     priv = X25519PrivateKey.from_private_bytes(base64.b64decode(open(f"{S}/log-x25519.key").read()))
-    follow = "-f" in sys.argv[1:]
+    following = "-f" in sys.argv[1:]
     args = [a for a in sys.argv[1:] if a != "-f"]
-    since = args[0] if args else ("10m" if follow else "1h")
-    url = f"https://ntfy.sh/{topic}/json?since={since}" + ("" if follow else "&poll=1")
-    with urllib.request.urlopen(url, timeout=None if follow else 30) as r:
+    since = args[0] if args else ("10m" if following else "1h")
+    if following:
+        follow(topic, since, priv)
+        return
+    with urllib.request.urlopen(f"https://ntfy.sh/{topic}/json?since={since}&poll=1", timeout=30) as r:
         for line in r:
             show(json.loads(line), priv)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)
