@@ -29,6 +29,8 @@ def call(method, path, body=None):
             return e.code, json.loads(t)
         except ValueError:
             return e.code, {"raw": t[:300]}
+    except (urllib.error.URLError, OSError) as e:   # timeout, reset, DNS: status 0, never a traceback
+        return 0, {"error": str(e)}
 
 
 def user_data(pubkey):
@@ -49,14 +51,37 @@ def ipv4(d):
     return next((n["ip_address"] for n in d["networks"]["v4"] if n["type"] == "public"), None)
 
 
+def find_by_name(name, tries=6):
+    """The id of the droplet named exactly NAME (this run's unique name), polled briefly since a
+    droplet created by a POST whose reply was lost may show up late; None if there is none.
+    Exits loudly if the lookup itself never completes."""
+    answered = False
+    for i in range(tries):
+        st, js = call("GET", "/droplets?tag_name=gvpndroid-build&per_page=200")
+        if st == 200:
+            answered = True
+            ids = [d["id"] for d in js.get("droplets", []) if d.get("name") == name]
+            if ids:
+                return ids[0]
+        if i < tries - 1:
+            time.sleep(10)
+    if not answered:
+        sys.exit(f"!!! could not check whether droplet {name} exists: check https://cloud.digitalocean.com/droplets !!!")
+    return None
+
+
 def create(name, size, region, pubkey_file):
     pub = open(pubkey_file).read().strip()
     st, js = call("POST", "/droplets", {"name": name, "region": region, "size": size,
                                         "image": "ubuntu-24-04-x64", "user_data": user_data(pub),
                                         "tags": ["gvpndroid-build"]})
-    if st != 202:
-        sys.exit(f"create failed: {st} {js}")
-    did = js["droplet"]["id"]
+    did = js.get("droplet", {}).get("id") if st == 202 else None
+    if did is None:
+        # The reply may be lost after DigitalOcean created it: never POST again, look it up by name.
+        print(f"create: no droplet id ({st} {js}); looking for {name}", file=sys.stderr)
+        did = find_by_name(name)
+        if did is None:
+            sys.exit(f"create failed: {st} {js}")
     print(did, flush=True)
     for _ in range(90):
         st, js = call("GET", f"/droplets/{did}")

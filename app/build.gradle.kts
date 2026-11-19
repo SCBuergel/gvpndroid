@@ -56,6 +56,7 @@ android {
             it.inputs.file("../scripts/do-build/lib.sh")
             it.inputs.file("../scripts/do-build/rebuild.sh")
             it.inputs.file("../scripts/do-build/build-remote.sh")
+            it.inputs.file("../scripts/do-build/droplet.py")
         }
     }
 
