@@ -34,9 +34,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     @Volatile private var coreRunning = false
     /** Generation of the core this instance started; older cores' lifecycle events are ignored. */
     @Volatile private var coreGeneration = -1L
-    @Volatile private var tun: ParcelFileDescriptor? = null
-    @Volatile private var tunParams: String? = null
     @Volatile private var wantConnected = false
+    private val tuns = TunSlot<ParcelFileDescriptor> { wantConnected }
     @Volatile private var status: org.json.JSONObject? = null
     /** Where to connect (exit address or destination id); read by the connect loop on every pass. */
     @Volatile private var target: String? = null
@@ -409,34 +408,37 @@ class GnosisTunnel(private val context: Context) : Tunnel {
         val mtu = event.getInt("mtu")
         val dns = event.optString("dns")
         val params = "$address|$mtu|$dns"
+        // After a disconnect, give-up or shutdown began, the request is refused (tuns checks
+        // wantConnected under the lock closeTun takes), so it cannot reopen the VPN.
+        val refuse = {
+            LogBuffer.log("gnosis: refusing a tun request: the VPN is no longer wanted")
+            GnosisNative.tunReadyFor(generation, id, -1)
+        }
+        // The CONNECTED is set under the lock too, so a later close's DISCONNECTED comes after it.
+        val hand = { pfd: ParcelFileDescriptor, detail: String ->
+            GnosisNative.tunReadyFor(generation, id, pfd.fd)?.let { error(it) }
+            coreRestarts = 0
+            set(Tunnel.State.CONNECTED, detail)
+        }
         try {
-            val current = tun
-            if (current != null && params == tunParams) {
-                GnosisNative.tunReadyFor(generation, id, current.fd)?.let { error(it) }
-                coreRestarts = 0
-                set(Tunnel.State.CONNECTED, "reconnected in place, tun kept")
-                return
+            when (tuns.handSame(params) { hand(it, "reconnected in place, tun kept") }) {
+                TunSlot.Answer.HANDED -> return
+                TunSlot.Answer.REFUSED -> { refuse(); return }
+                TunSlot.Answer.BUILD_NEW -> {}
             }
             val service = GnosisVpnService.obtain(context)
             val pfd = service.establish(address, mtu, dns.ifEmpty { null })
                 ?: error("establish() returned null (VPN permission missing?)")
-            tun = pfd
-            tunParams = params
-            current?.let { runCatching { it.close() } }
-            GnosisNative.tunReadyFor(generation, id, pfd.fd)?.let { error(it) }
-            coreRestarts = 0
-            set(Tunnel.State.CONNECTED, "tun $address mtu $mtu")
+            if (!tuns.install(pfd, params) { hand(it, "tun $address mtu $mtu") }) refuse()
         } catch (e: Exception) {
             LogBuffer.log("gnosis: tun setup failed: ${e.javaClass.simpleName}: ${e.message}")
             GnosisNative.tunReadyFor(generation, id, -1)
-            set(Tunnel.State.ERROR, "tun setup failed")
+            if (wantConnected) set(Tunnel.State.ERROR, "tun setup failed")
         }
     }
 
     private fun closeTun(stopService: Boolean) {
-        tun?.let { runCatching { it.close() } }
-        tun = null
-        tunParams = null
+        tuns.close()
         if (stopService) GnosisVpnService.stop(context)
     }
 
