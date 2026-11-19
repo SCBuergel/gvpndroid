@@ -218,7 +218,8 @@ pub extern "system" fn Java_org_gnosisvpn_stub_GnosisNative_tunReadyFor(
             return Err("the app could not establish the VPN tun".to_string());
         }
         let sock = TUN_SOCKET.get().ok_or("core not started")?;
-        // SAFETY: Kotlin keeps the ParcelFileDescriptor open for the duration of this call.
+        // SAFETY: the caller passes an fd that no other thread can close during this call:
+        // GnosisTunnel calls this only from TunSlot's hand, under the lock TunSlot.close takes.
         let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
         // The fd must be in the socket before the core reads TunnelReady and calls recv_tun_fd.
         socket::fd_passing::send_fd(sock, &borrowed).map_err(|e| format!("send tun fd: {e}"))?;

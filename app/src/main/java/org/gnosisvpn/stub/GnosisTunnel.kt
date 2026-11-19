@@ -414,7 +414,8 @@ class GnosisTunnel(private val context: Context) : Tunnel {
             LogBuffer.log("gnosis: refusing a tun request: the VPN is no longer wanted")
             GnosisNative.tunReadyFor(generation, id, -1)
         }
-        // The CONNECTED is set under the lock too, so a later close's DISCONNECTED comes after it.
+        // Under the lock closeTun takes: the fd stays open while tunReadyFor borrows it (lib.rs),
+        // and a later close's DISCONNECTED comes after this CONNECTED.
         val hand = { pfd: ParcelFileDescriptor, detail: String ->
             GnosisNative.tunReadyFor(generation, id, pfd.fd)?.let { error(it) }
             coreRestarts = 0
