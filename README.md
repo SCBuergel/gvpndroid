@@ -51,9 +51,11 @@ You need an Android 8.0+ phone (64-bit ARM for the Gnosis backend; 32-bit ARM ph
 the WireGuard backend), and a small amount of wxHOPR and xDAI on Gnosis Chain, or a funding
 code.
 
-1. **Get an APK.** There are no published releases. Ask the developer for a debug build, or
-   build one yourself (see [Building](#building)). Debug builds install as
-   `org.gnosisvpn.stub.debug`, next to any other version.
+1. **Get an APK.** Download `gvpndroid-0.0.N.apk` from the repository's
+   [Releases](../../releases) page, or build one yourself (see [Building](#building)). The
+   `.sha256` file next to it has the checksum. Release builds install as
+   `org.gnosisvpn.stub.debug`, next to any other version, and each one installs over the
+   previous one.
 2. **Install and open it.** On first start the app sets up the Gnosis backend by itself, with
    the data files bundled in the APK.
 3. **Back up the identity.** Settings → Developer screen → Export identity saves the node key
@@ -108,10 +110,15 @@ not stored in the repository:
 The core's data files come from the official Gnosis VPN package: run
 `scripts/gnosis-assets.sh UNPACKED_DEB_ROOT` once before the first APK build.
 
+The GitHub release workflow (`.github/workflows/release.yml`) does all of this on a GitHub
+runner (the core for 64-bit ARM, the data files, the APK and its checks) and publishes the APK
+as a release when a `v0.0.N` tag is pushed.
+
 ## Status and known gaps
 
-- Prototype only: the package name is still `org.gnosisvpn.stub`, and only debug builds have
-  been distributed.
+- Prototype only: versions stay at 0.0.x, the package name is still `org.gnosisvpn.stub`, and
+  every published APK is a debug build (with the log relay described above, when it is enabled
+  for that release; the release notes say whether it is).
 - No core for 32-bit ARM phones.
 - No in-tunnel health ping (see [How it works](#how-it-works)), so idle tunnels may reconnect.
 - In November 2026 a multi-agent review of the whole code base went through 25 review passes

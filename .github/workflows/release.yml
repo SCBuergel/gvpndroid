@@ -1,0 +1,176 @@
+# Builds the phone APK (Rust core for arm64-v8a, the Gnosis data files, the app) and publishes it
+# as a GitHub release. Trigger: push a tag v0.0.N that matches versionName in app/build.gradle.kts,
+# or run it by hand ("Run workflow") to build without publishing.
+#
+# Repository secrets:
+#   ANDROID_DEBUG_KEYSTORE_B64  required. base64 of the debug keystore every release is signed with
+#                               (standard debug passwords). One key for all releases, or an update
+#                               won't install over the previous one, and an uninstall loses the
+#                               node identity.
+#   GVPNDROID_NTFY_TOPIC        optional, with GVPNDROID_LOG_X25519_PUB: turns the debug log relay
+#   GVPNDROID_LOG_X25519_PUB    on (README). Without them the relay is off and hidden.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The official Gnosis VPN package the data files (config, geoip, PIX proving files) come from.
+  GNOSISVPN_DEB: gnosisvpn_1.1.0_amd64.deb
+  GNOSISVPN_DEB_SHA256: c944e294c408916d21a62e29262af52d5f0f66fe6715056d33c1f407559d7712
+  NDK_VER: r27c
+  NDK_SHA1: 090e8083a715fdb1a3e402d0763c388abb03fb4e
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the version (0.0.x only; the tag must match)
+        id: version
+        run: |
+          name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+          echo "versionName $name"
+          [[ $name =~ ^0\.0\.[0-9]+$ ]] || { echo "::error::versionName $name is not 0.0.x"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$name" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match versionName $name (expected v$name)"; exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Check the signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
+        run: |
+          [ -n "$KEYSTORE" ] || { echo "::error::secret ANDROID_DEBUG_KEYSTORE_B64 is missing (see the top of this workflow)"; exit 1; }
+          mkdir -p ~/.android
+          printf '%s' "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
+          chmod 600 ~/.android/debug.keystore
+
+      - name: Free disk space (the Rust build needs about 25 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Rust core sources
+        run: |
+          rev=$(sed -n 's/^CLIENT_REV=\${CLIENT_REV:-\([^}]*\)}.*/\1/p' scripts/do-build/run.sh)
+          [ -n "$rev" ] || { echo "::error::no CLIENT_REV in scripts/do-build/run.sh"; exit 1; }
+          echo "CLIENT_REV=$rev" >> "$GITHUB_ENV"
+          git clone -q https://github.com/gnosis/gnosis_vpn-client.git "$RUNNER_TEMP/client"
+          git -C "$RUNNER_TEMP/client" checkout -q "$rev"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential cmake clang pkg-config libmnl-dev libnftnl-dev >/dev/null
+
+      - name: Android NDK
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "https://dl.google.com/android/repository/android-ndk-${NDK_VER}-linux.zip"
+          echo "${NDK_SHA1}  android-ndk-${NDK_VER}-linux.zip" | sha1sum -c --quiet
+          unzip -q "android-ndk-${NDK_VER}-linux.zip" && rm "android-ndk-${NDK_VER}-linux.zip"
+          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-${NDK_VER}" >> "$GITHUB_ENV"
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/client/target
+          key: core-${{ hashFiles('scripts/do-build/run.sh', 'rust/**') }}
+          restore-keys: core-
+
+      - name: Rust toolchain
+        working-directory: ${{ runner.temp }}/client
+        run: |
+          rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
+          rustup target add aarch64-linux-android
+          command -v cargo-ndk >/dev/null || cargo install --locked cargo-ndk
+
+      - name: Build the Rust core (contract tests first)
+        run: |
+          [ -f ~/.cargo/env ] || printf 'export PATH="$HOME/.cargo/bin:$PATH"\n' > ~/.cargo/env   # build-remote.sh sources it
+          up=$RUNNER_TEMP/upload; mkdir -p "$up"
+          cp rust/patches/0001-android-target.patch "$up/"
+          cp -r rust/gnosis_vpn-android "$up/"
+          ABIS=arm64-v8a PROFILE=fast SRC="$RUNNER_TEMP/client" UP="$up" OUT="$RUNNER_TEMP/out" \
+            bash scripts/do-build/build-remote.sh
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          cp "$RUNNER_TEMP/out/arm64-v8a/libgnosisvpn.so" app/src/main/jniLibs/arm64-v8a/
+
+      - name: Gnosis data files
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfLO "https://download.vpn.gnosis.eth.limo/linux/apt/pool/main/g/gnosisvpn/$GNOSISVPN_DEB"
+          echo "$GNOSISVPN_DEB_SHA256  $GNOSISVPN_DEB" | sha256sum -c --quiet
+          dpkg-deb -x "$GNOSISVPN_DEB" deb
+          cd "$GITHUB_WORKSPACE" && sh scripts/gnosis-assets.sh "$RUNNER_TEMP/deb"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+          # scripts/check-apk.sh sources ~/android/env.sh, as on the developer machine.
+          mkdir -p ~/android
+          printf 'export ANDROID_HOME=%s\nexport PATH="$ANDROID_HOME/platform-tools:$PATH"\n' "$ANDROID_HOME" > ~/android/env.sh
+
+      - name: Debug log relay settings (optional)
+        env:
+          TOPIC: ${{ secrets.GVPNDROID_NTFY_TOPIC }}
+          PUB: ${{ secrets.GVPNDROID_LOG_X25519_PUB }}
+        run: |
+          d=$RUNNER_TEMP/secrets; mkdir -p "$d"; chmod 700 "$d"
+          echo "GVPNDROID_SECRETS=$d" >> "$GITHUB_ENV"
+          if [ -n "$TOPIC" ] && [ -n "$PUB" ]; then
+            printf '%s\n' "$TOPIC" > "$d/ntfy-topic"; printf '%s\n' "$PUB" > "$d/log-x25519.pub"
+            echo "RELAY_NOTE=The debug log relay is on (see the README)." >> "$GITHUB_ENV"
+          else
+            echo "RELAY_NOTE=The debug log relay is off in this build." >> "$GITHUB_ENV"
+          fi
+
+      - name: Build, lint, unit tests, APK check
+        run: |
+          ./gradlew --no-daemon assembleDebug lintDebug testDebugUnitTest -PphoneOnly
+          PHONE_ONLY=1 sh scripts/check-apk.sh
+          out=gvpndroid-${{ steps.version.outputs.name }}.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "$out"
+          sha256sum "$out" | tee "$out.sha256"
+          echo "APK=$out" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gvpndroid-${{ steps.version.outputs.name }}
+          path: |
+            ${{ env.APK }}
+            ${{ env.APK }}.sha256
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<EOF
+          Prototype build ${{ steps.version.outputs.name }}, phones with 64-bit ARM (Android 8.0+).
+          ${RELAY_NOTE}
+
+          Read the README before installing: the node identity and its funds are real.
+          Installs as org.gnosisvpn.stub.debug; disconnect before installing an update.
+
+          SHA-256: $(cut -d' ' -f1 "$APK.sha256")
+          Core: gnosis_vpn-client ${CLIENT_REV}; data files: ${GNOSISVPN_DEB}.
+          EOF
+          gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" --title "gvpndroid ${{ steps.version.outputs.name }}" --notes-file notes.md --prerelease

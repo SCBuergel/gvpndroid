@@ -23,6 +23,10 @@ sync when behaviour it describes changes, but put implementation detail here.
   is gone after a run.
 - **Push only when asked.** `origin` is `git@github.com:SCBuergel/gvpndroid.git`; local `ui` is
   pushed as `main`.
+- **Versions stay at 0.0.x** until the owner says otherwise (owner decision, 2026-11-19).
+  `versionName` is `0.0.N`; `versionCode` only ever rises (an update must install over the
+  previous build), so it does not follow the name. `VersionPolicyTest` and the release workflow
+  both enforce the 0.0.x rule.
 
 ## Tests: what to run
 
@@ -340,6 +344,36 @@ describes its behaviour for users.
 - **Removing it:** delete those files and the `DEBUG ONLY` blocks, then delete the calls the
   compiler reports.
 
+## Releases (GitHub Actions)
+
+`.github/workflows/release.yml` builds the phone APK on a GitHub runner and publishes it as a
+GitHub pre-release:
+
+1. Bump `versionCode` (+1) and `versionName` (`0.0.N`) in `app/build.gradle.kts`, run the gate,
+   commit and push.
+2. Push the tag: `git tag v0.0.N && git push origin v0.0.N`. The workflow refuses a tag that
+   does not equal `v` + `versionName`, and any `versionName` outside 0.0.x.
+3. It clones gnosis_vpn-client at `CLIENT_REV` (read from `scripts/do-build/run.sh`), runs
+   `scripts/do-build/build-remote.sh` there for arm64-v8a (the Rust contract tests, then the
+   core), unpacks the pinned official package (`GNOSISVPN_DEB`, checked by SHA-256) through
+   `scripts/gnosis-assets.sh`, then runs assembleDebug, lint, the unit tests and
+   `PHONE_ONLY=1 scripts/check-apk.sh`.
+4. It publishes `gvpndroid-0.0.N.apk` and its `.sha256` file. "Run workflow" by hand builds the
+   same APK as a workflow artifact without publishing.
+
+Repository secrets (Settings → Secrets and variables → Actions):
+
+- `ANDROID_DEBUG_KEYSTORE_B64` (required): `base64 -w0 ~/.android/debug.keystore` of the
+  maintainer's machine. Every release must be signed with this one key: a different key means
+  the update does not install over the previous one, and uninstalling deletes the node identity.
+- `GVPNDROID_NTFY_TOPIC` and `GVPNDROID_LOG_X25519_PUB` (optional): the contents of `ntfy-topic`
+  and `log-x25519.pub`. With both, the release has the debug log relay on; without them it is
+  off. Published APKs are public if the repository is, and so is the topic inside them.
+
+When the client or the gnosisvpn package moves: update `CLIENT_REV` in `run.sh` (the workflow
+follows it) and `GNOSISVPN_DEB` / `GNOSISVPN_DEB_SHA256` in the workflow. The apt pool keeps only
+the current package, so an old pin stops downloading once a new package is out.
+
 ## Installing on the maintainer's phone
 
 The maintainer's main phone profile blocks sideloaded apps (Google Advanced Protection), so
@@ -356,7 +390,7 @@ litterbox.catbox.moe, with a 1 h expiry.
 3. Download it back and compare the checksum.
 4. Give the owner the URL together with a QR code image, never an ASCII QR code.
 
-Bump `versionCode` and `versionName` in `app/build.gradle.kts` for every build handed out, so
+Bump `versionCode` and `versionName` (0.0.N) in `app/build.gradle.kts` for every build handed out, so
 it installs over the previous one.
 
 Alternatively, use adb over Wi-Fi. This is untested and may be blocked:
