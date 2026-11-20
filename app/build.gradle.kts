@@ -23,11 +23,17 @@ android {
         applicationId = "org.gnosisvpn.stub"
         minSdk = 26
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.0.1"
+        versionCode = 17
+        versionName = "0.0.2"
 
         // Phones: keep the prebuilt wireguard-go libraries for ARM, drop x86.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+    }
+
+    // CI (the release workflow) signs with the maintainer's debug key given by path, so every release
+    // installs over the previous one. Locally the default ~/.android/debug.keystore is used.
+    System.getenv("GVPNDROID_DEBUG_KEYSTORE")?.let { ks ->
+        signingConfigs.getByName("debug") { storeFile = file(ks) }
     }
 
     buildTypes {

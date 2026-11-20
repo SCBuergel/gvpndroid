@@ -27,6 +27,9 @@ env:
   # The official Gnosis VPN package the data files (config, geoip, PIX proving files) come from.
   GNOSISVPN_DEB: gnosisvpn_1.1.0_amd64.deb
   GNOSISVPN_DEB_SHA256: c944e294c408916d21a62e29262af52d5f0f66fe6715056d33c1f407559d7712
+  # SHA-256 of the signing certificate (not the key): a release signed with anything else would not
+  # install over the previous one, so the workflow refuses it.
+  SIGNING_CERT_SHA256: c25f91fb6e79d590ff9fd17db272bc12f0144d29917154cb0b201a524567fc72
   NDK_VER: r27c
   NDK_SHA1: 090e8083a715fdb1a3e402d0763c388abb03fb4e
 
@@ -53,9 +56,13 @@ jobs:
           KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
         run: |
           [ -n "$KEYSTORE" ] || { echo "::error::secret ANDROID_DEBUG_KEYSTORE_B64 is missing (see the top of this workflow)"; exit 1; }
-          mkdir -p ~/.android
-          printf '%s' "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
-          chmod 600 ~/.android/debug.keystore
+          ks=$RUNNER_TEMP/debug.keystore
+          printf '%s' "$KEYSTORE" | base64 -d > "$ks"
+          chmod 600 "$ks"
+          echo "GVPNDROID_DEBUG_KEYSTORE=$ks" >> "$GITHUB_ENV"
+          # The certificate every release must carry (the maintainer's debug key; public, not a secret).
+          got=$(keytool -exportcert -alias androiddebugkey -keystore "$ks" -storepass android | sha256sum | cut -d' ' -f1)
+          [ "$got" = "$SIGNING_CERT_SHA256" ] || { echo "::error::the keystore secret holds certificate $got, expected $SIGNING_CERT_SHA256"; exit 1; }
 
       - name: Free disk space (the Rust build needs about 25 GB)
         run: |
@@ -146,6 +153,8 @@ jobs:
         run: |
           ./gradlew --no-daemon assembleDebug lintDebug testDebugUnitTest -PphoneOnly
           PHONE_ONLY=1 sh scripts/check-apk.sh
+          signed=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          [ "$signed" = "$SIGNING_CERT_SHA256" ] || { echo "::error::APK signed with $signed, expected $SIGNING_CERT_SHA256"; exit 1; }
           out=gvpndroid-${{ steps.version.outputs.name }}.apk
           cp app/build/outputs/apk/debug/app-debug.apk "$out"
           sha256sum "$out" | tee "$out.sha256"
