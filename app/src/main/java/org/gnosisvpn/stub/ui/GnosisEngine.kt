@@ -161,11 +161,23 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         val busy = h.load?.let { if (it < 0.5) "Low" else if (it < 0.85) "Medium" else "High" } ?: ""
         return Exit(
             l.id, city = l.name, country = country, place = l.place,
-            ping = h.pingMs ?: 0, rel = (h.firstRelays ?: 0).coerceIn(0, 3), spots = free, slots = total,
-            pv = h.pathValue ?: 0.0, fr = h.firstRelays ?: 0, measured = measured, busy = busy,
+            ping = h.pingMs ?: 0, rel = 0, spots = free, slots = total,
+            pv = h.pathValue ?: -1.0, fr = 0, measured = measured, busy = busy,
             full = measured && total > 0 && free <= 0, offline = h.unrecoverable, routable = h.reachable,
             countryCode = cc ?: "",
         ).also { it.checkedAt = h.checkedAtMs; it.load = h.load; it.checking = h.checking }
+    }
+
+    /**
+     * As routeGrade() in gnosis_vpn-app since the core reports percent_of_best: bars from this exit's
+     * share of the best exit's path alone (90, 60 and 25 percent), "not measured yet" without one.
+     */
+    override fun grade(e: Exit?): Grade {
+        if (e == null || unavailable(e)) return Grade("hidden", 0, "Unavailable")
+        if (e.pv < 0) return Grade("unmeasured", 0, "Not measured yet", null, -0.5)
+        val pct = (e.pv * 100).roundToInt()
+        val n = when { pct >= 90 -> 4; pct >= 60 -> 3; pct >= 25 -> 2; else -> 1 }
+        return Grade("ok", n, listOf("", "Poor", "Fair", "Good", "Excellent")[n], if (n >= 3) Tone.OK else if (n == 2) Tone.WARN else Tone.BAD, e.pv)
     }
 
     /** While no exit has a good route yet (the core keeps probing), "best" is the one with the best path. */

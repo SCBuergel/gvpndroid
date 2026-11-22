@@ -388,8 +388,7 @@ private fun DetailsCard(eng: Engine, act: Act) {
             }
             Text("Diagnostics", style = T.lbl, color = p.onV, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
             Dl("Last checked", ago(e.checkedAt), mono = true)
-            Dl("Path", if (e.pv > 0) "${(e.pv * 100).roundToInt()}%" else "—", mono = true)
-            Dl("First relays", if (e.fr > 0) "${e.fr}" else "—")
+            Dl("Path (of best exit)", if (e.pv > 0) "${(e.pv * 100).roundToInt()}%" else "—", mono = true)
             Dl("Route", "1 hop")
             Dl("Open spots", if (e.slots > 0) "${e.spots} of ${e.slots}" else "—", divider = false)
             if (eng.left() > 0 && eng.isOn()) Usage(eng, "Usage", act)

@@ -6,7 +6,8 @@
 #        KEEP=1 scripts/do-build/run.sh   keep the droplet for iterating: scripts/do-build/rebuild.sh,
 #                                          then scripts/do-build/down.sh (the deadline stays armed)
 # Env: SIZE (c-32), REGION (ams3), PROFILE (fast | release), ABIS ("arm64-v8a x86_64"),
-#      CLIENT_REV (gnosis_vpn-client commit the patch is made for), DEADLINE_S (21600), TESTS (1)
+#      CLIENT_REV (gnosis_vpn-client commit the patch is made for), CLIENT_REPO (where that commit is),
+#      DEADLINE_S (21600), TESTS (1)
 # The DigitalOcean token is read by droplet.py from $DO_TOKEN_FILE (default ~/do-api-token).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -14,7 +15,9 @@ cd "$(dirname "$0")/../.."
 REPO=$(pwd)
 DO_TOKEN_FILE=$(token_file); export DO_TOKEN_FILE   # one token file for create, teardown and the deadline
 SIZE=${SIZE:-c-32}; REGION=${REGION:-ams3}; PROFILE=${PROFILE:-fast}; ABIS=${ABIS:-arm64-v8a x86_64}
-CLIENT_REV=${CLIENT_REV:-8a0e3be}; DEADLINE_S=${DEADLINE_S:-21600}
+# The payment-stall fixes (relayer side-car, hold until paid) are draft PRs: the commit is on a fork.
+CLIENT_REPO=${CLIENT_REPO:-https://github.com/SCBuergel/gnosis_vpn-client.git}
+CLIENT_REV=${CLIENT_REV:-c768ccf1}; DEADLINE_S=${DEADLINE_S:-21600}
 TESTS=${TESTS:-1}; case $TESTS in 0|1) ;; *) echo "TESTS must be 0 or 1" >&2; exit 2 ;; esac   # 0 skips the contract tests
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
 ST=$HOME/.local/state/gvpndroid-do; mkdir -p "$ST"; chmod 700 "$ST"
@@ -77,7 +80,7 @@ step ssh
 ssh_ mkdir -p /root/upload
 scp -q -r "${SSH_OPTS[@]}" scripts/do-build/setup-remote.sh scripts/do-build/build-remote.sh \
     rust/patches/0001-android-target.patch rust/gnosis_vpn-android "root@$ip:/root/upload/"
-ssh_ "CLIENT_REV=$CLIENT_REV bash /root/upload/setup-remote.sh" | grep -E '^STEP|^rustc|SETUP-DONE'
+ssh_ "CLIENT_REPO=$CLIENT_REPO CLIENT_REV=$CLIENT_REV bash /root/upload/setup-remote.sh" | grep -E '^STEP|^rustc|SETUP-DONE'
 step setup
 
 # Detached on the droplet so a dropped SSH connection does not kill the build.

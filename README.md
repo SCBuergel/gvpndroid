@@ -23,8 +23,9 @@ Android only lets an app route traffic through a VPN by giving it a tun interfac
 `VpnService`. On the desktop, a separate root process creates the tun and installs a firewall
 for the core. On Android, the app takes that job:
 
-1. **The app starts the core in its own process.** The core is the unmodified gnosis_vpn-client
-   (pinned commit, IPC v3) with a small Android patch, compiled to `libgnosisvpn.so`. A Rust
+1. **The app starts the core in its own process.** The core is gnosis_vpn-client (pinned commit,
+   IPC v5; since 0.0.3 a fork commit with draft fixes for payment stalls, see `AGENTS.md`) with
+   a small Android patch, compiled to `libgnosisvpn.so`. A Rust
    bridge crate exposes it to Kotlin over JNI. The app talks to the core with the same JSON
    commands and status messages the desktop CLI uses.
 2. **The core runs the HOPR node.** It discovers exits, opens a channel and a session to the
@@ -64,8 +65,10 @@ code.
    and links to the Gnosis VPN funding site, where you can pay from a wallet or redeem a funding
    code. The app continues by itself once the funds arrive.
 5. **Connect.** Pick an exit or let the app choose one. The first connection opens a payment
-   channel on chain, which can take a minute or two. While a payment is pending, the exit holds
-   traffic for up to about 3 minutes; the app shows this.
+   channel on chain, which can take a minute or two. Every connect then waits about 40 s on
+   "Opening the route and paying the exit": the core pays the exit first and attaches the
+   tunnel only once the exit can see the payment, so traffic does not stop at the exit's free
+   allowance (about 14 MB).
 6. **Optional: turn on Lockdown** from the app, which opens Android's VPN settings, so no
    traffic leaves the phone outside the VPN.
 

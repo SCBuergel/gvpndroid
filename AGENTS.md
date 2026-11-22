@@ -54,7 +54,7 @@ sync when behaviour it describes changes, but put implementation detail here.
 - **Test naming:** regression tests are named after their finding, for example
   `R2_4StartRetryTest.kt`, one file per finding.
 - **Contract tests:**
-  - `GnosisLiveDataTest` checks the parsers against client 8a0e3be's IPC v3 types;
+  - `GnosisLiveDataTest` checks the parsers against client c768ccf1's IPC v5 types;
   - `GnosisEngineTest` drives the engine over a fake tunnel;
   - `EngineTest` keeps the shared state machine on the UI prototype's rules.
 
@@ -129,8 +129,8 @@ top of the real core.
     address as a QR code with a GnosisScan link), then the core's real start-up stages, or the
     failure page.
   - **Exits:** the core's destinations with route health, quick-check latency, slots and load.
-    Route health compares the path value against the core's own 0.9 weak-route threshold and
-    also shows the first relays.
+    Route health is the core's `percent_of_best` (this exit's path as a share of the best
+    exit's), graded into bars as gnosis_vpn-app's `routeGrade()` does: 90, 60 and 25 percent.
   - **The session:** connect phases, connected, reconnecting and stalls. It also tracks the
     data bought for the session (PIX chunks of 660 MB): data left, renewals, pending or failed
     payments, and an exit that went away. The core renews by itself, so there is no Auto-renew
@@ -165,8 +165,8 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
 ### Rust core and bridge
 
 - **`rust/gnosis_vpn-android/`: the JNI bridge crate.** It is built as `libgnosisvpn.so` inside
-  a gnosis_vpn-client checkout (`CLIENT_REV` in `scripts/do-build/run.sh`, currently 8a0e3be,
-  v1.1.1) with `rust/patches/0001-android-target.patch` applied. It plays the part of the
+  a gnosis_vpn-client checkout (`CLIENT_REPO` and `CLIENT_REV` in `scripts/do-build/run.sh`)
+  with `rust/patches/0001-android-target.patch` applied. It plays the part of the
   desktop root process:
   - the tun comes from `GnosisVpnService`;
   - the kill switch is Android's Always-on VPN;
@@ -179,13 +179,33 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
   - It adds Android support (`killswitch/android.rs`).
   - It makes `Core::start` shut the node down on every return, because in the app no process
     exit does that.
-  - Its `Cargo.lock` moves hoprnet master from 2acc3a58 to ff0076ef. This transport fix judges
-    a relayer over the hop its replies use.
+  - Its `Cargo.lock` adds the bridge crate's entry (`build-remote.sh` builds `--locked`).
+  - It moves hopr-strategy (`[patch.crates-io]` and its one `Cargo.lock` source line) to
+    SCBuergel/hopr-strategy d6ad33ff: the Curvy pool retries the note lookup after the relayer
+    reports a deposit, instead of dropping a deposit Blokli has not indexed yet.
 
-  The client already pins hopr-strategy 9.2.0 and edgli main 7bafb47.
+- **The client commit (since 0.0.3):** `c768ccf1` of the fork SCBuergel/gnosis_vpn-client,
+  branch `sidecar-relayer-hold`: gnosis_vpn-client main e6b33f36 (v1.1.1, IPC v5) plus three
+  draft commits for payment stalls (gnosis/gnosis_vpn-client#1075 and #1076):
+  - edgli points at SCBuergel/edge-client `sidecar-relayer` (hoprnet/edge-client#276), which
+    adds a `RelayerRoute` to the payment pool;
+  - on desktop the core opens an extra, unpaid session to the exit for the Curvy relayer
+    (`api.curvy.box:443`), because there the relayer's traffic would otherwise go through the
+    tunnel the exit holds until it is paid. **Our patch turns the side-car off on Android**
+    (`connection/up/runner.rs`, step 5b): the app is excluded from its own VPN, so the relayer is
+    reached directly anyway, and no production exit is known to allow that target (one without
+    it makes every relayer request fail until the 150 s fallback);
+  - the core holds the tunnel back until the first deposit is made, plus a fixed 22 s for the
+    exit to see it, so the user's traffic does not stop at the exit's free allowance (about
+    14 MB). No hold if no payment is asked for within 10 s; after 150 s without a deposit it
+    connects without the hold. On Android the hold always runs. The core reports `opening_ping`
+    the whole time, so the app names that step "Opening the route and paying the exit".
+
+  The pinned hoprnet already contains the transport fix ff0076ef the patch used to add. Go back
+  to upstream gnosis/gnosis_vpn-client once these drafts or their replacements are merged.
 - **Bumping the client:**
   1. Regenerate the patch against the new commit.
-  2. Update `CLIENT_REV`.
+  2. Update `CLIENT_REV`, and `CLIENT_REPO` if the commit is not on gnosis/gnosis_vpn-client.
   3. Update `tests/protocol.json` and the Kotlin parsers together.
   4. Run `run.sh`.
 - **Device settings, outside the repo:**
@@ -353,7 +373,7 @@ GitHub pre-release:
    commit and push.
 2. Push the tag: `git tag v0.0.N && git push origin v0.0.N`. The workflow refuses a tag that
    does not equal `v` + `versionName`, and any `versionName` outside 0.0.x.
-3. It clones gnosis_vpn-client at `CLIENT_REV` (read from `scripts/do-build/run.sh`), runs
+3. It clones `CLIENT_REPO` at `CLIENT_REV` (both read from `scripts/do-build/run.sh`), runs
    `scripts/do-build/build-remote.sh` there for arm64-v8a (the Rust contract tests, then the
    core), unpacks the pinned official package (`GNOSISVPN_DEB`, checked by SHA-256) through
    `scripts/gnosis-assets.sh`, then runs assembleDebug, lint, the unit tests and
@@ -370,7 +390,7 @@ Repository secrets (Settings → Secrets and variables → Actions):
   and `log-x25519.pub`. With both, the release has the debug log relay on; without them it is
   off. Published APKs are public if the repository is, and so is the topic inside them.
 
-When the client or the gnosisvpn package moves: update `CLIENT_REV` in `run.sh` (the workflow
+When the client or the gnosisvpn package moves: update `CLIENT_REV` (and `CLIENT_REPO`) in `run.sh` (the workflow
 follows it) and `GNOSISVPN_DEB` / `GNOSISVPN_DEB_SHA256` in the workflow. The apt pool keeps only
 the current package, so an old pin stops downloading once a new package is out.
 

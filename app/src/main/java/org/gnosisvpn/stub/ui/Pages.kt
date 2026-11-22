@@ -211,7 +211,7 @@ private fun HoldPill(eng: Engine, id: String) {
 }
 
 private val STAT_TIPS = mapOf("Latency" to "Round trip through the relay to the exit and back.", "Checked" to "When this exit was last measured.",
-    "Path" to "Quality of the best path through the mixnet. Below 90 % counts as a weak route.", "Relays" to "Different first relays the route can start with.",
+    "Path" to "This exit's best path through the mixnet, as a share of the best exit's path right now.",
     "Load" to "How busy the exit is: used slots out of all slots.", "Cost" to "Data set aside from your balance when you connect here.")
 
 @Composable
@@ -219,7 +219,7 @@ private fun RowStats(eng: Engine, e: Exit) {
     val p = LocalPal.current
     val a = eng.left(e.id); val m = e.measured; val load = eng.serverLoad(e)
     val items = listOf("Latency" to (if (m) "${e.ping.grouped()} ms" else "—"), "Checked" to ago(e.checkedAt), "Path" to (if (e.pv > 0) "${(e.pv * 100).roundToInt()}%" else "—"),
-        "Relays" to (if (e.fr > 0) "${e.fr}" else "—"), "Load" to (if (load != null) "$load%" else "—"), "Cost" to (if (a > 0) "${a.roundToInt()} MB left" else eng.chunkTxt()))
+        "Load" to (if (load != null) "$load%" else "—"), "Cost" to (if (a > 0) "${a.roundToInt()} MB left" else eng.chunkTxt()))
     Column(Modifier.padding(start = 66.dp, end = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items.chunked(3).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

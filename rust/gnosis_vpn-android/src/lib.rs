@@ -193,7 +193,8 @@ fn command(text: &str) -> Result<String, CommandError> {
 }
 
 fn command_within(text: &str, timeout: Duration) -> Result<String, CommandError> {
-    // Never echo the command: some carry secrets (FundingTool), and the reply ends up in logs.
+    // Never echo the command: a command may carry a secret (the core once had FundingTool), and the
+    // reply ends up in logs.
     let cmd: WorkerCommand = serde_json::from_str(text).map_err(|e| {
         CommandError::refused(format!("bad command ({:?} error at line {} column {})", e.classify(), e.line(), e.column()))
     })?;

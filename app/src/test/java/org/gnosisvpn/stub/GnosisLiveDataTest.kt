@@ -12,7 +12,7 @@ import java.math.BigDecimal
 
 /**
  * What the UI shows comes from these parsers: exit health, the session with its data chunks, the
- * wallet and start-up steps. Samples follow client 8a0e3be's IPC v3 types
+ * wallet and start-up steps. Samples follow client c768ccf1's IPC v5 types
  * (gnosis_vpn-ipc protocol.rs); the running status is a real reply from tests/protocol.json.
  */
 class GnosisLiveDataTest {
@@ -31,8 +31,9 @@ class GnosisLiveDataTest {
         val h = d.health!!
         assertEquals("DE", h.countryCode)
         assertTrue(h.reachable)
-        assertEquals(0.7697826838068121, h.pathValue!!, 1e-9)
-        assertEquals(3, h.firstRelays)
+        assertEquals("the best exit in the sample", 1.0, h.pathValue!!, 1e-9)
+        val uk = GnosisProtocol.destinations(data).first { it.name == "Bonnie Prince Charlie" }.health!!
+        assertEquals(0.69, uk.pathValue!!, 1e-9)
         assertNull("not checked yet", h.pingMs)
         assertEquals(660160512L, GnosisProtocol.chunkBytes(data))
         assertNull("running: no start-up progress", GnosisProtocol.startup(data))
@@ -40,14 +41,14 @@ class GnosisLiveDataTest {
     }
 
     @Test fun quickCheckGivesLatencyAndLoad() {
-        val rh = JSONObject("""{"state":{"type":"routable"},"last_error":null,"walk":null,
+        val rh = JSONObject("""{"state":{"type":"routable"},"last_error":null,"walked_at":null,"percent_of_best":null,
             "quick_probe":{"type":"checked","checked_at":1794944505491,"versions":{"api":[]},"api_version":"v1",
               "load":{"slots":{"total":10,"available":4,"connected":6},"load_avg":{"one":1.0,"five":1.0,"fifteen":1.0,"nproc":4}},
               "status_rtt":412}}""")
         val h = GnosisProtocol.health(rh, "GB")
         assertEquals(412, h.pingMs); assertEquals(10, h.slotsTotal); assertEquals(4, h.slotsFree)
         assertEquals(0.25, h.load!!, 1e-9); assertEquals(1794944505491L, h.checkedAtMs)
-        val down = GnosisProtocol.health(JSONObject("""{"state":{"type":"unrecoverable","reason":{"type":"not_allowed"}},"last_error":"denied","walk":null,"quick_probe":null}"""), null)
+        val down = GnosisProtocol.health(JSONObject("""{"state":{"type":"unrecoverable","reason":{"type":"not_allowed"}},"last_error":"denied","walked_at":null,"percent_of_best":null,"quick_probe":null}"""), null)
         assertFalse(down.reachable); assertTrue(down.unrecoverable); assertEquals("denied", down.problem)
     }
 
@@ -123,16 +124,18 @@ class GnosisLiveDataTest {
     }
 
     @Test fun whyAnExitCannotBeReached() {
-        assertEquals("No relay path to the exit right now (0 forward, 2 return). Last error: no path found",
-            GnosisProtocol.whyNot(JSONObject("""{"state":{"type":"not_routable"},"walk":{"type":"no_path","walked_at":1,"forward_count":0,"return_count":2},"last_error":"no path found","quick_probe":null}""")))
+        assertEquals("There is no route to this exit right now. Last error: no path found",
+            GnosisProtocol.whyNot(JSONObject("""{"state":{"type":"not_routable"},"walked_at":1,"percent_of_best":null,"last_error":"no path found","quick_probe":null}""")))
         assertEquals("The exit refused the session: handshake timeout.",
-            GnosisProtocol.whyNot(JSONObject("""{"state":{"type":"unrecoverable","reason":{"type":"cannot_open_session","error":"handshake timeout"}},"walk":null,"last_error":null}""")))
+            GnosisProtocol.whyNot(JSONObject("""{"state":{"type":"unrecoverable","reason":{"type":"cannot_open_session","error":"handshake timeout"}},"walked_at":null,"percent_of_best":null,"last_error":null}""")))
         // a connect reply carries only the state
         assertEquals("This exit runs a version this app cannot talk to.",
             GnosisProtocol.whyNot(JSONObject("""{"type":"unrecoverable","reason":{"type":"incompatible_api_version","offered":[]}}""")))
-        val h = GnosisProtocol.health(JSONObject("""{"state":{"type":"not_routable"},"walk":{"type":"not_announced","walked_at":1},"last_error":null,"quick_probe":null}"""), null)
-        assertEquals("The exit has not announced itself on the network, so there is no way to reach it.", h.why)
-        assertNull(GnosisProtocol.health(JSONObject("""{"state":{"type":"routable"},"last_error":null,"walk":null,"quick_probe":null}"""), null).why)
+        // IPC v5: no route search yet (walked_at null) is told apart from no route found
+        val h = GnosisProtocol.health(JSONObject("""{"state":{"type":"not_routable"},"walked_at":null,"percent_of_best":null,"last_error":null,"quick_probe":null}"""), null)
+        assertEquals("The app is still looking for a route to this exit.", h.why)
+        assertNull("no percent without a route", h.pathValue)
+        assertNull(GnosisProtocol.health(JSONObject("""{"state":{"type":"routable"},"last_error":null,"walked_at":null,"percent_of_best":null,"quick_probe":null}"""), null).why)
     }
 
     @Test fun connectRefusals() {

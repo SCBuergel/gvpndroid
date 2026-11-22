@@ -7,7 +7,7 @@ import org.gnosisvpn.stub.Tunnel as T
 
 /** A user's stop holds until the tunnel is down; the tunnel's last state does not bring the connection back (finding R4-4). */
 class R4_4StopIntentTest {
-    private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9, firstRelays = 2))
+    private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9))
     private val session = T.Session("0xa", 1, step = 9, steps = 10, bytesLeft = 400_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED)
     private class Hooks : EngineHooks { var connects = 0; var stops = 0; override fun connectVpn() { connects++ }; override fun disconnectVpn() { stops++ } }
 

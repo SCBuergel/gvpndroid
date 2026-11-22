@@ -15,7 +15,7 @@ class R5_8ConnectFromSettingsTest {
         e.hooks = object : EngineHooks { override fun connectVpn() { connects++ } }
         e.start()
         tn.phase = "running"
-        tn.locations = listOf("0xa", "0xb").map { T.Location(it, "Exit $it", "City", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9, firstRelays = 2)) }
+        tn.locations = listOf("0xa", "0xb").map { T.Location(it, "Exit $it", "City", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9)) }
         e.t += 1; e.step(1.0)
     }
 

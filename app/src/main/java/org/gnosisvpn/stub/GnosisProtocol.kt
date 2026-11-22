@@ -45,11 +45,12 @@ object GnosisProtocol {
             val meta = d.optJSONObject("meta")
             val other = meta?.optJSONObject("other")
             val geo = d.optJSONObject("geo")
+            // optString reads a JSON null as the text "null" (a config-pinned exit has meta.name null).
             val place = listOfNotNull(
-                other?.optString("location")?.takeIf { it.isNotEmpty() },
-                other?.optString("flag")?.takeIf { it.isNotEmpty() } ?: geo?.optString("country")?.takeIf { it.isNotEmpty() },
+                other?.let { str(it, "location") },
+                other?.let { str(it, "flag") } ?: geo?.let { str(it, "country") },
             ).joinToString(", ")
-            val name = meta?.optString("name")?.takeIf { it.isNotEmpty() } ?: d.optString("id")
+            val name = meta?.let { str(it, "name") } ?: d.optString("id")
             val cc = geo?.optString("country")?.takeIf { it.length == 2 }
             Destination(d.optString("id"), d.optString("address"), name, place, health(arr.getJSONObject(i).optJSONObject("route_health"), cc))
         }.sortedBy { it.name }
@@ -59,7 +60,8 @@ object GnosisProtocol {
     fun health(rh: JSONObject?, countryCode: String?): Tunnel.ExitHealth {
         if (rh == null) return Tunnel.ExitHealth(countryCode)
         val state = rh.optJSONObject("state")?.optString("type")
-        val walk = rh.optJSONObject("walk")?.takeIf { it.optString("type") == "paths" }
+        // IPC v5: this exit's path value as a share of the best exit's, 0-100; null while it has no route.
+        val percentOfBest = rh.takeIf { it.has("percent_of_best") && !it.isNull("percent_of_best") }?.optInt("percent_of_best")
         val qp = rh.optJSONObject("quick_probe")
         val check = when (qp?.optString("type")) {
             "checked" -> qp
@@ -79,8 +81,7 @@ object GnosisProtocol {
             slotsTotal = slots?.optInt("total"),
             slotsFree = slots?.optInt("available"),
             load = if (avg != null && nproc > 0) avg.optDouble("one") / nproc else null,
-            pathValue = walk?.optDouble("best_value")?.takeIf { !it.isNaN() },
-            firstRelays = walk?.optInt("distinct_first_relays"),
+            pathValue = percentOfBest?.let { it / 100.0 },
             checking = qp?.optString("type") == "checking",
             problem = rh.optString("last_error").takeIf { it.isNotEmpty() && it != "null" }
                 ?: qp?.takeIf { it.optString("type") == "failed" }?.optString("error"),
@@ -90,13 +91,12 @@ object GnosisProtocol {
 
     /**
      * Why an exit can't be reached, in words, from its route health: the full DestinationStatus
-     * route_health (state, walk, last_error, quick_probe) or just a RouteHealthState (a connect
+     * route_health (state, walked_at, percent_of_best, last_error, quick_probe) or just a RouteHealthState (a connect
      * reply). The same wording as gvpndows.
      */
     fun whyNot(rh: JSONObject?): String {
         val st = rh?.optJSONObject("state") ?: rh?.takeIf { it.has("type") }
         val reason = st?.optJSONObject("reason")
-        val walk = rh?.optJSONObject("walk")
         fun str(o: JSONObject?, k: String) = o?.optString(k)?.takeIf { it.isNotEmpty() && it != "null" }
         val qp = rh?.optJSONObject("quick_probe")
         val text = when (st?.optString("type")) {
@@ -106,11 +106,9 @@ object GnosisProtocol {
                 "cannot_open_session" -> "The exit refused the session: ${str(reason, "error") ?: "no reason given"}."
                 else -> "The exit cannot be used ($t)."
             }
-            "not_routable" -> when (walk?.optString("type")) {
-                "not_announced" -> "The exit has not announced itself on the network, so there is no way to reach it."
-                "no_path" -> "No relay path to the exit right now (${walk.optInt("forward_count")} forward, ${walk.optInt("return_count")} return)."
-                else -> "There is no route to this exit right now."
-            }
+            // IPC v5 no longer says why there is no path; walked_at null means no route search ran yet.
+            "not_routable" -> if (rh?.has("walked_at") == true && rh.isNull("walked_at")) "The app is still looking for a route to this exit."
+                else "There is no route to this exit right now."
             else -> "The exit did not answer the connection attempt."
         }
         val last = str(rh, "last_error") ?: str(qp?.optJSONObject("last"), "error") ?: str(qp, "error")
@@ -153,10 +151,13 @@ object GnosisProtocol {
 
     private fun str(o: JSONObject, k: String) = o.takeIf { it.has(k) && !it.isNull(k) }?.optString(k)?.takeIf { it.isNotEmpty() }
 
-    /** The connect phases in order (ConnectPhase), with readable names. */
+    /**
+     * The connect phases in order (ConnectPhase), with readable names. opening_ping also covers the
+     * core's hold until the first payment is made (about 40 s; the core reports no phase of its own).
+     */
     val CONNECT_PHASES = listOf(
         "init" to "Starting", "gather_peer_ips" to "Finding relays", "killswitch_lockdown" to "Blocking traffic outside the VPN",
-        "generating_wg" to "Creating your keys", "register_wg" to "Registering with the exit", "opening_ping" to "Opening the route",
+        "generating_wg" to "Creating your keys", "register_wg" to "Registering with the exit", "opening_ping" to "Opening the route and paying the exit",
         "establish_wg_tunnel" to "Securing the tunnel", "verify_ping" to "Checking the tunnel", "adjust_to_main" to "Moving to the main route",
         "connection_established" to "Connected",
     )

@@ -8,7 +8,7 @@ import org.gnosisvpn.stub.Tunnel as T
 
 /** The core's data left and free flag belong to the live session only; nothing is held at an exit after it (finding R4-1). */
 class R4_1SessionDataTest {
-    private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9, firstRelays = 2))
+    private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9))
 
     private fun setup(): Pair<FakeTunnel, GnosisEngine> {
         val tn = FakeTunnel(); val e = GnosisEngine({ tn }); e.hooks = object : EngineHooks {}; e.start()

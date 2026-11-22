@@ -22,12 +22,13 @@ interface Tunnel {
 
     /**
      * What the backend measured about an exit; null fields are unknown.
-     * [pathValue] is the best route's quality (0..1), [firstRelays] how many different first relays lead there.
+     * [pathValue] is this exit's best route as a share of the best exit's route right now (0..1; the core's
+     * percent_of_best), so the best exit is always 1.
      */
     data class ExitHealth(
         val countryCode: String? = null, val reachable: Boolean = true, val unrecoverable: Boolean = false,
         val pingMs: Int? = null, val checkedAtMs: Long? = null, val slotsTotal: Int? = null, val slotsFree: Int? = null,
-        val load: Double? = null, val pathValue: Double? = null, val firstRelays: Int? = null, val checking: Boolean = false,
+        val load: Double? = null, val pathValue: Double? = null, val checking: Boolean = false,
         val problem: String? = null,
         /** Why the exit can't be reached right now, in words (from its route health); null when it can. */
         val why: String? = null,

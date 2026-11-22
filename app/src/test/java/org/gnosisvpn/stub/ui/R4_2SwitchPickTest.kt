@@ -7,7 +7,7 @@ import org.gnosisvpn.stub.Tunnel as T
 
 /** A switch keeps the user's pick until the core reports a session there or stops (finding R4-2). */
 class R4_2SwitchPickTest {
-    private fun loc(id: String, name: String) = T.Location(id, name, "City $name", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9, firstRelays = 2))
+    private fun loc(id: String, name: String) = T.Location(id, name, "City $name", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9))
     private fun session(id: String) = T.Session(id, 1, step = 9, steps = 10, bytesLeft = 400_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED)
 
     private fun connectedToA(): Pair<FakeTunnel, GnosisEngine> {

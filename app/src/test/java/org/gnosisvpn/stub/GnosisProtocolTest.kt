@@ -21,6 +21,15 @@ class GnosisProtocolTest {
         assertEquals(JSONObject(commands.getString("connect")).toMap(), JSONObject(GnosisProtocol.connect("gvpn-ger-1-j9os")).toMap())
     }
 
+    /** An exit pinned in the config (lab exit) has no name: show its id, never the text "null". */
+    @Test
+    fun aPinnedExitWithoutANameShowsItsId() {
+        val data = JSONObject("""{"destinations":[{"destination":{"id":"lab","address":"0xa532c96b39275210a3756c93f84338bd4661a55d",
+            "meta":{"name":null,"other":{"location":"vpn-lab exit","flag":null}},"geo":null},"route_health":null}]}""")
+        val d = GnosisProtocol.destinations(data).single()
+        assertEquals("lab", d.name); assertEquals("vpn-lab exit", d.place)
+    }
+
     @Test
     fun locationsFromARealStatus() {
         val data = GnosisProtocol.statusData(fixture.getJSONObject("status_running").toString())!!

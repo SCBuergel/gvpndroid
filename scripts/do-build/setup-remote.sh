@@ -3,6 +3,7 @@
 # Prints "STEP <name> <seconds>" lines for timing.
 set -euo pipefail
 CLIENT_REV=${CLIENT_REV:?}            # gnosis_vpn-client commit to build
+CLIENT_REPO=${CLIENT_REPO:-https://github.com/gnosis/gnosis_vpn-client.git}   # the repository that has it
 NDK_VER=${NDK_VER:-r27c}
 NDK_SHA1=${NDK_SHA1:-090e8083a715fdb1a3e402d0763c388abb03fb4e}
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1  # skip needrestart service restarts
@@ -25,7 +26,7 @@ unzip -q "android-ndk-${NDK_VER}-linux.zip" && rm "android-ndk-${NDK_VER}-linux.
 step ndk
 
 mkdir -p /src && cd /src
-git clone -q https://github.com/gnosis/gnosis_vpn-client.git
+git clone -q "$CLIENT_REPO" gnosis_vpn-client
 cd gnosis_vpn-client && git checkout -q "$CLIENT_REV"
 rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install "$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" --profile minimal
 rustup target add aarch64-linux-android x86_64-linux-android >/dev/null

@@ -1,13 +1,12 @@
 {
- "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0, updated for v1.1.1 (pix_pool, pix_price_per_byte) (exit addresses are public).",
+ "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0, updated for v1.1.1 (pix_pool, pix_price_per_byte) and for IPC v5 at c768ccf1 (route_health walked_at and percent_of_best instead of walk; no funding_tool) (exit addresses are public).",
  "commands": {
   "status": "{\"type\":\"status\"}",
   "disconnect": "{\"type\":\"disconnect\"}",
   "connect": "{\"type\":\"connect\",\"destination\":\"gvpn-ger-1-j9os\"}",
   "balance": "{\"type\":\"balance\"}",
   "nerd_stats": "{\"type\":\"nerd_stats\"}",
-  "probing_boost": "{\"type\":\"probing_boost\"}",
-  "funding_tool": "{\"type\":\"funding_tool\",\"secret\":\"EXAMPLE-CODE\"}"
+  "probing_boost": "{\"type\":\"probing_boost\"}"
  },
  "status_running": {
   "type": "status",
@@ -68,21 +67,8 @@
        "type": "routable"
       },
       "last_error": null,
-      "walk": {
-       "type": "paths",
-       "walked_at": 1794944505491,
-       "count": 3,
-       "distinct_first_relays": 3,
-       "best_relays": [
-        "0x942f2f256B7B00EAD42dd3938505ae2ab8Ae3e67"
-       ],
-       "best_value": 0.8841114207999616,
-       "return_count": 3,
-       "return_best_relays": [
-        "0x8370b362037555ed756DF45d095f1F229c31ec2b"
-       ],
-       "return_best_value": 0.2298673408
-      },
+      "walked_at": 1794944505491,
+      "percent_of_best": 69,
       "quick_probe": null
      }
     },
@@ -118,21 +104,8 @@
        "type": "routable"
       },
       "last_error": null,
-      "walk": {
-       "type": "paths",
-       "walked_at": 1794944505494,
-       "count": 3,
-       "distinct_first_relays": 3,
-       "best_relays": [
-        "0xC20e27A158891D8994Ef0346C0c94dFe6377D04E"
-       ],
-       "best_value": 0.7697826838068121,
-       "return_count": 3,
-       "return_best_relays": [
-        "0xf4a841e3c338588Ac3e94524EE07b40619f08bD2"
-       ],
-       "return_best_value": 0.33120951808
-      },
+      "walked_at": 1794944505494,
+      "percent_of_best": 100,
       "quick_probe": null
      }
     }
@@ -178,7 +151,6 @@
     "node_address": "0xf9f8a1C7aDBb89460F0249A9DC5A9327068EF072",
     "node_xdai": "0",
     "node_wxhopr": "0",
-    "funding_tool": null,
     "issue": null,
     "balance_recommendation": {
      "wxhopr": "225350000002225467152",

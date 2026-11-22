@@ -153,9 +153,9 @@ class FakeTunnel : org.gnosisvpn.stub.Tunnel {
 
 class GnosisEngineTest {
     private fun ger(ping: Int? = 380, free: Int = 4) = org.gnosisvpn.stub.Tunnel.Location("0xe5cE", "GVPN-GER-1", "DE",
-        org.gnosisvpn.stub.Tunnel.ExitHealth("DE", pingMs = ping, slotsTotal = 10, slotsFree = free, pathValue = 0.95, firstRelays = 3, load = 0.3))
+        org.gnosisvpn.stub.Tunnel.ExitHealth("DE", pingMs = ping, slotsTotal = 10, slotsFree = free, pathValue = 0.95, load = 0.3))
     private fun uk() = org.gnosisvpn.stub.Tunnel.Location("0xE7FD", "Bonnie Prince Charlie", "Edinburgh, UK",
-        org.gnosisvpn.stub.Tunnel.ExitHealth("GB", pingMs = 900, slotsTotal = 10, slotsFree = 8, pathValue = 0.92, firstRelays = 2))
+        org.gnosisvpn.stub.Tunnel.ExitHealth("GB", pingMs = 900, slotsTotal = 10, slotsFree = 8, pathValue = 0.92))
     private fun wallet(wx: String, lvl: org.gnosisvpn.stub.Tunnel.Level = org.gnosisvpn.stub.Tunnel.Level.GOOD) =
         org.gnosisvpn.stub.Tunnel.Wallet("0xf9f8", java.math.BigDecimal(wx), java.math.BigDecimal("0.004"), lvl, org.gnosisvpn.stub.Tunnel.Level.GOOD,
             dataBytes = java.math.BigDecimal(wx).divide(java.math.BigDecimal("0.000000009"), java.math.MathContext.DECIMAL64).toLong())
@@ -173,6 +173,19 @@ class GnosisEngineTest {
         return Triple(tn, e, h)
     }
     private fun GnosisEngine.tick(n: Int = 1) = repeat(n) { t += 1; step(1.0) }
+
+    /** The core reports percent_of_best (IPC v5): bars as gnosis_vpn-app's routeGrade, cut at 90, 60 and 25. */
+    @Test fun gradesFollowThePercentOfTheBestExit() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"
+        fun exit(id: String, pct: Int?) = org.gnosisvpn.stub.Tunnel.Location(id, "Exit $id", "DE",
+            org.gnosisvpn.stub.Tunnel.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = pct?.let { it / 100.0 }))
+        tn.locations = listOf(exit("0xa", 100), exit("0xb", 89), exit("0xc", 59), exit("0xd", 24), exit("0xe", null))
+        e.tick()
+        assertEquals(listOf(4, 3, 2, 1, 0), listOf("0xa", "0xb", "0xc", "0xd", "0xe").map { e.grade(e.ex(it)).n })
+        assertEquals("Not measured yet", e.grade(e.ex("0xe")).label)
+        assertEquals("0xa", e.best()?.id)
+    }
 
     @Test fun fundingGateThenStartupThenRunning() {
         val (tn, e, h) = setup()

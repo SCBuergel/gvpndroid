@@ -9,7 +9,7 @@ import org.gnosisvpn.stub.Tunnel as T
 
 /** A core restart under a live connection keeps the home screen with a working stop (finding R4-6). */
 class R4_6CoreRestartTest {
-    private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9, firstRelays = 2))
+    private fun loc(id: String) = T.Location(id, "Exit $id", "City $id", T.ExitHealth("DE", pingMs = 400, slotsTotal = 10, slotsFree = 5, pathValue = 0.9))
     private val session = T.Session("0xa", 1, step = 9, steps = 10, bytesLeft = 400_000_000, bytesBought = 660_160_512, payment = T.Payment.FUNDED)
     private class Hooks : EngineHooks { var stops = 0; var connects = 0; override fun disconnectVpn() { stops++ }; override fun connectVpn() { connects++ } }
     private fun GnosisEngine.tick(n: Int = 1) = repeat(n) { t += 1; step(1.0) }

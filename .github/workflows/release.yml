@@ -73,8 +73,11 @@ jobs:
         run: |
           rev=$(sed -n 's/^CLIENT_REV=\${CLIENT_REV:-\([^}]*\)}.*/\1/p' scripts/do-build/run.sh)
           [ -n "$rev" ] || { echo "::error::no CLIENT_REV in scripts/do-build/run.sh"; exit 1; }
+          repo=$(sed -n 's/^CLIENT_REPO=\${CLIENT_REPO:-\([^}]*\)}.*/\1/p' scripts/do-build/run.sh)
+          [ -n "$repo" ] || { echo "::error::no CLIENT_REPO in scripts/do-build/run.sh"; exit 1; }
           echo "CLIENT_REV=$rev" >> "$GITHUB_ENV"
-          git clone -q https://github.com/gnosis/gnosis_vpn-client.git "$RUNNER_TEMP/client"
+          echo "CLIENT_REPO=$repo" >> "$GITHUB_ENV"
+          git clone -q "$repo" "$RUNNER_TEMP/client"
           git -C "$RUNNER_TEMP/client" checkout -q "$rev"
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential cmake clang pkg-config libmnl-dev libnftnl-dev >/dev/null
@@ -180,6 +183,6 @@ jobs:
           Installs as org.gnosisvpn.stub.debug; disconnect before installing an update.
 
           SHA-256: $(cut -d' ' -f1 "$APK.sha256")
-          Core: gnosis_vpn-client ${CLIENT_REV}; data files: ${GNOSISVPN_DEB}.
+          Core: gnosis_vpn-client ${CLIENT_REV} (${CLIENT_REPO}); data files: ${GNOSISVPN_DEB}.
           EOF
           gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" --title "gvpndroid ${{ steps.version.outputs.name }}" --notes-file notes.md --prerelease

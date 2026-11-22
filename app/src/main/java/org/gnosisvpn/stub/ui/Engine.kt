@@ -237,9 +237,12 @@ open class Engine {
     }
 
     /* ---- route grade (as routeGrade() in gnosis_vpn-app) ---- */
-    fun grade(e: Exit?): Grade {
-        if (e == null || e.full || e.offline || !e.routable || (e.measured && e.slots > 0 && e.spots <= 0 && !(isOn() && e.id == loc)))
-            return Grade("hidden", 0, "Unavailable")
+    /** No grade at all: full, offline, without a route, or out of slots (unless it is the exit in use). */
+    protected fun unavailable(e: Exit?): Boolean =
+        e == null || e.full || e.offline || !e.routable || (e.measured && e.slots > 0 && e.spots <= 0 && !(isOn() && e.id == loc))
+
+    open fun grade(e: Exit?): Grade {
+        if (e == null || unavailable(e)) return Grade("hidden", 0, "Unavailable")
         if (e.pv < MIN_PATH_VALUE) return Grade("weak", 1, "Weak route", Tone.BAD, -1.0)
         if (!e.measured) return Grade("unmeasured", 0, "Not measured yet", null, -0.5)
         val own = if (isOn() && e.id == loc) 1 else 0
