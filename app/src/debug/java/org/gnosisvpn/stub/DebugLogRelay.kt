@@ -92,18 +92,37 @@ object DebugLogRelay {
     /** Random id per install, so messages from several devices can be told apart. Not tied to the user. */
     private fun installId(): String = prefs().getString("id", null) ?: java.util.UUID.randomUUID().toString().take(8).also { prefs().edit().putString("id", it).apply() }
 
-    private fun tick() {
-        if (!on) { queue.reset(LogBuffer.count()); return }
+    /**
+     * Developer screen, "Send logs now": sends everything collected so far at once, outside the
+     * schedule (it still respects ntfy's limit). [done] gets a one-line result, on the relay thread.
+     */
+    fun sendNow(done: (String) -> Unit) {
+        if (!available || !started) { done("the log relay is not in this build"); return }
+        if (!on) { done("the log relay is off: turn it on first (bar at the top, or Settings → Logs)"); return }
+        LogBuffer.log("${DebugLogRelayCore.OWN} send logs now (asked on the developer screen)")
+        exec.execute {
+            val r = runCatching { tick(force = true) }.getOrElse { DebugLogRelayCore.Outcome.FAILED }
+            done(when (r) {
+                DebugLogRelayCore.Outcome.SENT, DebugLogRelayCore.Outcome.NOTHING -> "logs sent to the developer (id ${installId()})"
+                DebugLogRelayCore.Outcome.LIMITED -> "ntfy.sh refused (daily limit for this IP); try again later"
+                DebugLogRelayCore.Outcome.BUDGET -> "today's sending budget is used up; the lines go out as it refills"
+                else -> "sending failed (no connection?); the lines are kept and sent later"
+            })
+        }
+    }
+
+    private fun tick(force: Boolean = false): DebugLogRelayCore.Outcome {
+        if (!on) { queue.reset(LogBuffer.count()); return DebugLogRelayCore.Outcome.NOTHING }
         val (fresh, next, lost) = LogBuffer.since(queue.cursor)
         queue.take(fresh, next, lost)
         val now = System.currentTimeMillis()
-        if (now < blockedUntil) return
+        if (now < blockedUntil) return DebugLogRelayCore.Outcome.LIMITED
         // Start window: at most every INTERVAL_SEC, unless a line looks like a problem.
-        if (!DebugLogRelayCore.mayFlush(now, startedAt, lastSentAt, queue.hasUrgent(), START_MIN, INTERVAL_SEC)) return
+        if (!force && !DebugLogRelayCore.mayFlush(now, startedAt, lastSentAt, queue.hasUrgent(), START_MIN, INTERVAL_SEC)) return DebugLogRelayCore.Outcome.NOTHING
         val b = budget().also { it.refill(now) }
         val header = "gvpndroid ${BuildConfig.VERSION_NAME} · ${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE} · id ${installId()}"
         var lastCode = 0
-        val outcome = queue.flush(header, b) { plain, n, attachment ->
+        val outcome = queue.flush(header, b, force) { plain, n, attachment ->
             post("gvpndroid log ${installId()} #$n" + if (attachment) " (attachment)" else "", DebugLogRelayCore.seal(plain, key!!), attachment).also { lastCode = it }
         }
         when (outcome) {
@@ -122,6 +141,7 @@ object DebugLogRelay {
             else -> {}
         }
         save(b)
+        return outcome
     }
 
     /** POSTs [body] to the topic; returns the HTTP status, or -1 without a connection. */

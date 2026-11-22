@@ -25,7 +25,7 @@ object GnosisSetup {
         val zk = File(share, "curvy-zk").apply { mkdirs() }
         context.assets.list("$ASSETS/curvy-zk")!!.forEach { copyAsset(context, "$ASSETS/curvy-zk/$it", File(zk, it)) }
         val template = context.assets.open("$ASSETS/config.toml").bufferedReader().readText()
-        val config = assembleConfig(template, File(share, "geoip.mmdb").path, zk.path)
+        val config = LabExits.apply(assembleConfig(template, File(share, "geoip.mmdb").path, zk.path), LabExits.isOn(nb))
         GnosisNative.checkConfig(config)?.let { error("bundled config rejected: $it") }
         install(nb, config) { context.assets.open("$ASSETS/gnosis.properties") }
     }

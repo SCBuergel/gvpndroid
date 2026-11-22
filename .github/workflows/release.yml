@@ -7,8 +7,9 @@
 #                               (standard debug passwords). One key for all releases, or an update
 #                               won't install over the previous one, and an uninstall loses the
 #                               node identity.
-#   GVPNDROID_NTFY_TOPIC        optional, with GVPNDROID_LOG_X25519_PUB: turns the debug log relay
-#   GVPNDROID_LOG_X25519_PUB    on (README). Without them the relay is off and hidden.
+#   GVPNDROID_NTFY_TOPIC        required, with GVPNDROID_LOG_X25519_PUB: the debug log relay
+#   GVPNDROID_LOG_X25519_PUB    (README). Releases are test builds and always have the relay on; the
+#                               workflow refuses to build without both.
 name: release
 
 on:
@@ -138,19 +139,16 @@ jobs:
           mkdir -p ~/android
           printf 'export ANDROID_HOME=%s\nexport PATH="$ANDROID_HOME/platform-tools:$PATH"\n' "$ANDROID_HOME" > ~/android/env.sh
 
-      - name: Debug log relay settings (optional)
+      - name: Debug log relay settings (required)
         env:
           TOPIC: ${{ secrets.GVPNDROID_NTFY_TOPIC }}
           PUB: ${{ secrets.GVPNDROID_LOG_X25519_PUB }}
         run: |
+          [ -n "$TOPIC" ] && [ -n "$PUB" ] || { echo "::error::secrets GVPNDROID_NTFY_TOPIC and GVPNDROID_LOG_X25519_PUB are required: releases are debug builds with the log relay on"; exit 1; }
           d=$RUNNER_TEMP/secrets; mkdir -p "$d"; chmod 700 "$d"
           echo "GVPNDROID_SECRETS=$d" >> "$GITHUB_ENV"
-          if [ -n "$TOPIC" ] && [ -n "$PUB" ]; then
-            printf '%s\n' "$TOPIC" > "$d/ntfy-topic"; printf '%s\n' "$PUB" > "$d/log-x25519.pub"
-            echo "RELAY_NOTE=The debug log relay is on (see the README)." >> "$GITHUB_ENV"
-          else
-            echo "RELAY_NOTE=The debug log relay is off in this build." >> "$GITHUB_ENV"
-          fi
+          printf '%s\n' "$TOPIC" > "$d/ntfy-topic"; printf '%s\n' "$PUB" > "$d/log-x25519.pub"
+          echo "RELAY_NOTE=Debug build: the debug log relay is on and sends the app's log, encrypted, to the developer (see the README)." >> "$GITHUB_ENV"
 
       - name: Build, lint, unit tests, APK check
         run: |

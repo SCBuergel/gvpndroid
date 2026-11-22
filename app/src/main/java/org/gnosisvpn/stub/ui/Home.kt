@@ -231,6 +231,7 @@ fun HomeScreen(eng: Engine, act: Act, moreMsgs: Boolean, toggleMore: () -> Unit)
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             XIcon(x.id, eng, XS.XL)
                             Text(x.country, fontFamily = Inter, fontSize = 32.sp, lineHeight = 40.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.8).sp, color = p.on, modifier = Modifier.padding(top = 6.dp), textAlign = TextAlign.Center)
+                            eng.exitName(x)?.let { Text(it, style = T.tm, color = p.onV, textAlign = TextAlign.Center) }
                         }
                     }
                     if (c == Conn.CONNECTED && eng.metered && a > 0) DataLeft(eng, act)
@@ -335,6 +336,7 @@ private fun DetailCard(eng: Engine, act: Act, label: @Composable () -> Unit, chk
                         Text(e.country, style = T.tl, color = p.on)
                         Text(" #${eng.exitTag(e)}", style = T.mono.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium), color = p.onV)
                     }
+                    eng.exitName(e)?.let { Text(it, style = T.bm, color = p.onV, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) { Bars(e, eng, chk); QLine(e, eng) }
                 }
                 Ms("chevron_right", tint = p.onV)

@@ -54,7 +54,8 @@ code.
 
 1. **Get an APK.** Download `gvpndroid-0.0.N.apk` from the repository's
    [Releases](../../releases) page, or build one yourself (see [Building](#building)). The
-   `.sha256` file next to it has the checksum. Release builds install as
+   `.sha256` file next to it has the checksum. These are debug builds with the debug log relay
+   on (see [below](#what-the-debug-log-relay-sends)). They install as
    `org.gnosisvpn.stub.debug`, next to any other version, and each one installs over the
    previous one.
 2. **Install and open it.** On first start the app sets up the Gnosis backend by itself, with
@@ -71,6 +72,20 @@ code.
    allowance (about 14 MB).
 6. **Optional: turn on Lockdown** from the app, which opens Android's VPN settings, so no
    traffic leaves the phone outside the VPN.
+
+The main screen shows each exit's name ("GVPN-GER-1", "Bonnie Prince Charlie") under its
+country, so you can tell exits in the same country apart.
+
+**Developer screen** (Settings → Developer screen), for testing:
+
+- **Log level** cycles normal, verbose and debug for the app and the core.
+- **Send logs now** sends everything logged so far to the developer at once, instead of waiting
+  for the relay's schedule. The result shows in the log below it.
+- **Lab exits** (off by default) adds the vpn-lab's two test exits, "Lab exit Frankfurt" and
+  "Lab exit New York", to the exit list. The network does not announce them, so they are
+  pinned by address; everything else, including relay choice, stays as normal. Disconnect
+  before switching it: the core restarts to read the change. These are temporary machines
+  (Frankfurt until 2026-11-23 22:30 UTC, New York until 2026-11-24 22:35 UTC).
 
 Disconnect before installing an update.
 
@@ -91,10 +106,13 @@ Settings → Logs. That log covers the app and the core, at the selected log lev
   address.
 - **Turning it off:** a bar at the top of every screen says the relay is on and has an off
   switch; the same switch is in Settings → Logs.
+- **Sending at once:** Settings → Developer screen → Send logs now sends what was collected
+  so far without waiting for the schedule.
 
-Release builds don't contain the relay. They get an empty stand-in that also hides the bar and
-the setting. A build made without the developer's topic and key files also has the relay off
-and hidden.
+The APKs on the Releases page are debug builds and always have the relay on: the release
+workflow refuses to build without the topic and key. Android release builds (`assembleRelease`)
+don't contain the relay; they get an empty stand-in that also hides the bar and the setting. A
+local build made without the developer's topic and key files also has the relay off and hidden.
 
 ## Building
 

@@ -20,4 +20,5 @@ object DebugLogRelay {
     fun isOn(ctx: Context): Boolean = false
     fun setOn(ctx: Context, value: Boolean) {}
     fun start(ctx: Context) {}
+    fun sendNow(done: (String) -> Unit) = done("the log relay is not in this build")
 }

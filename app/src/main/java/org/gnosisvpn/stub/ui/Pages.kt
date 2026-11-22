@@ -160,6 +160,7 @@ private fun ExitRow(eng: Engine, act: Act, x: Exit, on: Boolean, b: Exit?, divid
                         Text(x.country, style = T.tm, color = p.on)
                         if (!eng.simple) Text(" #${eng.exitTag(x)}", style = T.mono.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium), color = p.onV)
                     }
+                    eng.exitName(x)?.let { Text(it, style = T.bm, color = p.onV, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
                     @OptIn(ExperimentalLayoutApi::class)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.Center) {
                         if (eng.warmNow() && x.id != b?.id) { Bars(x, eng, true); Text("Measuring…", style = T.ql, color = p.onV) }

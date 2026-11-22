@@ -153,9 +153,10 @@ object DebugLogRelayCore {
          * gets the gzip'd piece and its message number and returns the HTTP status, or -1 without
          * a connection. Only lines of pieces that were accepted leave the queue.
          */
-        fun flush(header: String, budget: Budget, send: (ByteArray, Long, Boolean) -> Int): Outcome {
+        /** [force]: the user asked to send now, so it spends from the budget like a problem line does. */
+        fun flush(header: String, budget: Budget, force: Boolean = false, send: (ByteArray, Long, Boolean) -> Int): Outcome {
             if (pending.isEmpty() && dropped == 0L) return Outcome.NOTHING
-            val urgent = hasUrgent()
+            val urgent = force || hasUrgent()
             // The loss note is a line of its own, so it goes out once, in the first piece.
             val note = if (dropped > 0) listOf("[$dropped lines were not sent: log ring or relay buffer full]") else emptyList()
             val lines = note + pending.toList()

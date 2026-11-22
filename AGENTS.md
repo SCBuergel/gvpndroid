@@ -108,8 +108,12 @@ The UI never needs to know which backend it talks to.
 - **`LogBuffer.kt`, `LogLevel.kt`:** the on-screen log, which includes the core's lines because
   a phone has no logcat to read them from. Levels are normal, verbose and debug.
 - **`MainActivity.kt`:** the original stub screen, now Settings → Developer screen. It has the
-  backend switch, Gnosis setup, identity export, the log level, the funding QR code and the raw
-  log.
+  backend switch, Gnosis setup, identity export, the log level, "Send logs now" (debug relay,
+  `DebugLogRelay.sendNow`), the lab-exit toggle, the funding QR code and the raw log.
+- **`LabExits.kt`:** the developer toggle that pins the vpn-lab's unannounced exits into
+  `gnosis.toml` as `[destinations.lab*]` (1 hop, a name, nothing else: no relay allowlist), in a
+  marked block it can remove again, then restarts the core. `GnosisSetup.enable` re-applies it.
+  The exits are temporary; drop them from `EXITS` once the lab machines are gone.
 
 A fresh install sets up the Gnosis backend by itself, using the data files from the APK. A
 WireGuard choice on the developer screen is kept across restarts. The Gnosis backend is used
@@ -386,9 +390,10 @@ Repository secrets (Settings → Secrets and variables → Actions):
 - `ANDROID_DEBUG_KEYSTORE_B64` (required): `base64 -w0 ~/.android/debug.keystore` of the
   maintainer's machine. Every release must be signed with this one key: a different key means
   the update does not install over the previous one, and uninstalling deletes the node identity.
-- `GVPNDROID_NTFY_TOPIC` and `GVPNDROID_LOG_X25519_PUB` (optional): the contents of `ntfy-topic`
-  and `log-x25519.pub`. With both, the release has the debug log relay on; without them it is
-  off. Published APKs are public if the repository is, and so is the topic inside them.
+- `GVPNDROID_NTFY_TOPIC` and `GVPNDROID_LOG_X25519_PUB` (required since 0.0.4, owner decision
+  2026-11-22: releases are test builds with logging on): the contents of `ntfy-topic` and
+  `log-x25519.pub`. The workflow refuses to build without them. Published APKs are public if the
+  repository is, and so is the topic inside them.
 
 When the client or the gnosisvpn package moves: update `CLIENT_REV` (and `CLIENT_REPO`) in `run.sh` (the workflow
 follows it) and `GNOSISVPN_DEB` / `GNOSISVPN_DEB_SHA256` in the workflow. The apt pool keeps only

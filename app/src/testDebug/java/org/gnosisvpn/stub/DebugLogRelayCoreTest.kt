@@ -84,6 +84,17 @@ class DebugLogRelayCoreTest {
 
     private fun unzip(z: ByteArray) = GZIPInputStream(z.inputStream()).readBytes().toString(Charsets.UTF_8).trimEnd('\n').split('\n')
 
+    @Test fun sendNowUsesTheReserveLikeAProblemLine() {
+        // Only one token left: ordinary lines wait for the refill, "Send logs now" (force) goes out.
+        val q = DebugLogRelayCore.Queue()
+        q.take(listOf("ordinary line"), next = 1, lost = 0)
+        val b = DebugLogRelayCore.Budget(tokens = 1.5, at = 1)
+        assertEquals(DebugLogRelayCore.Outcome.BUDGET, q.flush("h", b) { _, _, _ -> error("must wait for the budget") })
+        var sent = 0
+        assertEquals(DebugLogRelayCore.Outcome.SENT, q.flush("h", b, force = true) { _, _, _ -> sent++; 200 })
+        assertEquals(1, sent); assertTrue(q.pending.isEmpty())
+    }
+
     @Test fun queueSendsNewLinesOnceAndKeepsUnsentOnes() {
         val q = DebugLogRelayCore.Queue()
         val b = DebugLogRelayCore.Budget(tokens = 25.0, at = 1)

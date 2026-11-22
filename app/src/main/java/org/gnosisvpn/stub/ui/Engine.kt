@@ -629,6 +629,8 @@ open class Engine {
     open fun connectStep(): String? = null
     /** The short id after the country name. */
     open fun exitTag(e: Exit): String = xid(e.id)
+    /** The exit's own name ("GVPN-GER-1", "Lab exit Frankfurt") when it says more than the country. */
+    fun exitName(e: Exit): String? = e.city.trim().takeIf { it.isNotEmpty() && !it.equals(e.country, ignoreCase = true) }
     open fun serverLoad(e: Exit): Int? = null
     /** What the node needs: token, what it pays for, amount. */
     open fun fundingNeeds(): List<Triple<String, String, String>> = emptyList()

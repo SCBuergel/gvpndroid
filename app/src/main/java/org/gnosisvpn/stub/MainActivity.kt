@@ -60,14 +60,27 @@ class MainActivity : Activity() {
             if (app.usesGnosis) android.view.View.VISIBLE else android.view.View.GONE
         findViewById<Button>(R.id.locationButton).setOnClickListener { pickLocation() }
         findViewById<Button>(R.id.logButton).apply {
-            text = "Log: ${LogLevel.get(this@MainActivity).name.lowercase()}"
+            text = "Log level: ${LogLevel.get(this@MainActivity).name.lowercase()}"
             setOnClickListener {
                 val level = LogLevel.get(this@MainActivity).next()
                 LogLevel.set(this@MainActivity, level)
                 tunnel.setLogLevel(level)
-                text = "Log: ${level.name.lowercase()}"
+                text = "Log level: ${level.name.lowercase()}"
                 LogBuffer.log("log level ${level.name.lowercase()}")
             }
+        }
+        // DEBUG ONLY. REMOVE BEFORE PRODUCTION (developer log relay): send what was collected now.
+        findViewById<Button>(R.id.sendLogsButton).apply {
+            visibility = if (DebugLogRelay.available) android.view.View.VISIBLE else android.view.View.GONE
+            setOnClickListener {
+                isEnabled = false
+                DebugLogRelay.sendNow { result -> runOnUiThread { isEnabled = true; LogBuffer.log(result) } }
+            }
+        }
+        findViewById<Button>(R.id.labExitsButton).apply {
+            fun label() { text = "Lab exits: ${if (LabExits.isOn(noBackupFilesDir)) "on" else "off"}" }
+            label()
+            setOnClickListener { toggleLabExits(); label() }
         }
         findViewById<Button>(R.id.exportButton).apply {
             isEnabled = app.usesGnosis
@@ -134,6 +147,19 @@ class MainActivity : Activity() {
         } else {
             TunnelService.start(this, TunnelService.ACTION_CONNECT)
         }
+    }
+
+    /** Adds or removes the vpn-lab exits (LabExits) and restarts the core so it reads the config. */
+    private fun toggleLabExits() {
+        if (tunnel.state != Tunnel.State.DISCONNECTED && tunnel.state != Tunnel.State.ERROR) {
+            LogBuffer.log("lab exits: disconnect first")
+            return
+        }
+        val on = !LabExits.isOn(noBackupFilesDir)
+        val err = LabExits.set(noBackupFilesDir, on) { GnosisNative.checkConfig(it) }
+        if (err != null) { LogBuffer.log("lab exits: $err"); return }
+        LogBuffer.log("lab exits ${if (on) "on: " + LabExits.EXITS.joinToString { "${it.name} ${it.address}" } else "off"}; restarting the core")
+        app.restartGnosis()
     }
 
     /** Lists the exits the core has discovered; picking one connects (or reconnects) there. */
