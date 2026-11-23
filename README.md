@@ -52,7 +52,7 @@ You need an Android 8.0+ phone (64-bit ARM for the Gnosis backend; 32-bit ARM ph
 the WireGuard backend), and a small amount of wxHOPR and xDAI on Gnosis Chain, or a funding
 code.
 
-1. **Get an APK.** Download `gvpndroid-0.0.N.apk` from the repository's
+1. **Get an APK.** Download `gvpndroid-0.0.N-debug-logging.apk` from the repository's
    [Releases](../../releases) page, or build one yourself (see [Building](#building)). The
    `.sha256` file next to it has the checksum. These are debug builds with the debug log relay
    on (see [below](#what-the-debug-log-relay-sends)). They install as

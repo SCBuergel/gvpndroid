@@ -62,6 +62,7 @@ android {
             it.inputs.files(fileTree("../scripts") { exclude("**/__pycache__/**") }).withPropertyName("scripts")
             it.inputs.file("../rust/gnosis_vpn-android/tests/protocol.json")
             it.inputs.file("../rust/patches/0001-android-target.patch")
+            it.inputs.file("../.github/workflows/release.yml")
         }
     }
 

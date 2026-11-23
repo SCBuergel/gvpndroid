@@ -54,6 +54,16 @@ jobs:
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
+      - name: Remove an earlier release of this tag (a rebuild replaces it, file and all)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
+            echo "deleted the earlier release $GITHUB_REF_NAME"
+          fi
+
       - name: Check the signing key
         env:
           KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_B64 }}
@@ -169,14 +179,15 @@ jobs:
           PHONE_ONLY=1 sh scripts/check-apk.sh
           signed=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
           [ "$signed" = "$SIGNING_CERT_SHA256" ] || { echo "::error::APK signed with $signed, expected $SIGNING_CERT_SHA256"; exit 1; }
-          out=gvpndroid-${{ steps.version.outputs.name }}.apk
+          # Every release logs to the developer: the file name must say so.
+          out=gvpndroid-${{ steps.version.outputs.name }}-debug-logging.apk
           cp app/build/outputs/apk/debug/app-debug.apk "$out"
           sha256sum "$out" | tee "$out.sha256"
           echo "APK=$out" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gvpndroid-${{ steps.version.outputs.name }}
+          name: gvpndroid-${{ steps.version.outputs.name }}-debug-logging
           path: |
             ${{ env.APK }}
             ${{ env.APK }}.sha256
@@ -187,8 +198,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cat > notes.md <<EOF
+          **DEBUG BUILD WITH LOGGING ON.** This APK sends the app's complete log (app and VPN core, including
+          exits, addresses and network details), encrypted, to the developer: every 30 s for the first
+          15 minutes after start, then every few minutes. It can be turned off in the bar at the top of
+          the app or in Settings → Logs. Do not install it if you do not want that.
+
           Prototype build ${{ steps.version.outputs.name }}, phones with 64-bit ARM (Android 8.0+).
-          ${RELAY_NOTE}
 
           Read the README before installing: the node identity and its funds are real.
           Installs as org.gnosisvpn.stub.debug; disconnect before installing an update.
@@ -196,4 +211,4 @@ jobs:
           SHA-256: $(cut -d' ' -f1 "$APK.sha256")
           Core: gnosis_vpn-client ${CLIENT_REV} (${CLIENT_REPO}); data files: ${GNOSISVPN_DEB}.
           EOF
-          gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" --title "gvpndroid ${{ steps.version.outputs.name }}" --notes-file notes.md --prerelease
+          gh release create "$GITHUB_REF_NAME" "$APK" "$APK.sha256" --title "gvpndroid ${{ steps.version.outputs.name }} (debug build, logging on)" --notes-file notes.md --prerelease

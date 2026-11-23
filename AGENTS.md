@@ -382,7 +382,9 @@ GitHub pre-release:
    core), unpacks the pinned official package (`GNOSISVPN_DEB`, checked by SHA-256) through
    `scripts/gnosis-assets.sh`, then runs assembleDebug, lint, the unit tests and
    `PHONE_ONLY=1 scripts/check-apk.sh`.
-4. It publishes `gvpndroid-0.0.N.apk` and its `.sha256` file. "Run workflow" by hand builds the
+4. It publishes `gvpndroid-0.0.N-debug-logging.apk` and its `.sha256` file (every release logs to the
+   developer, so the file name and the release title must say so; owner rule 2026-11-23). A rebuild
+   of a tag first deletes that tag's earlier release. "Run workflow" by hand builds the
    same APK as a workflow artifact without publishing.
 
 Repository secrets (Settings → Secrets and variables → Actions):
