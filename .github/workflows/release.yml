@@ -7,9 +7,11 @@
 #                               (standard debug passwords). One key for all releases, or an update
 #                               won't install over the previous one, and an uninstall loses the
 #                               node identity.
-#   GVPNDROID_NTFY_TOPIC        required, with GVPNDROID_LOG_X25519_PUB: the debug log relay
-#   GVPNDROID_LOG_X25519_PUB    (README). Releases are test builds and always have the relay on; the
-#                               workflow refuses to build without both.
+#   GVPNDROID_NTFY_TOPIC        optional, with GVPNDROID_LOG_X25519_PUB: the debug log relay
+#   GVPNDROID_LOG_X25519_PUB    (README). Without them the workflow uses .github/relay/: the public
+#                               key as is, and the topic encrypted with a key derived from the signing
+#                               keystore above (SHA-256 of the keystore file). Releases are test builds
+#                               and always have the relay on; the workflow refuses to build without it.
 name: release
 
 on:
@@ -144,10 +146,21 @@ jobs:
           TOPIC: ${{ secrets.GVPNDROID_NTFY_TOPIC }}
           PUB: ${{ secrets.GVPNDROID_LOG_X25519_PUB }}
         run: |
-          [ -n "$TOPIC" ] && [ -n "$PUB" ] || { echo "::error::secrets GVPNDROID_NTFY_TOPIC and GVPNDROID_LOG_X25519_PUB are required: releases are debug builds with the log relay on"; exit 1; }
           d=$RUNNER_TEMP/secrets; mkdir -p "$d"; chmod 700 "$d"
           echo "GVPNDROID_SECRETS=$d" >> "$GITHUB_ENV"
-          printf '%s\n' "$TOPIC" > "$d/ntfy-topic"; printf '%s\n' "$PUB" > "$d/log-x25519.pub"
+          if [ -n "$TOPIC" ] && [ -n "$PUB" ]; then
+            printf '%s\n' "$TOPIC" > "$d/ntfy-topic"; printf '%s\n' "$PUB" > "$d/log-x25519.pub"
+          else
+            # The topic, encrypted with the SHA-256 of the signing keystore (decoded in "Check the signing key").
+            k=$RUNNER_TEMP/relay-key; sha256sum "$GVPNDROID_DEBUG_KEYSTORE" | cut -d' ' -f1 > "$k"; chmod 600 "$k"
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -a -pass "file:$k" -in .github/relay/ntfy-topic.enc -out "$d/ntfy-topic" \
+              || { echo "::error::cannot decrypt .github/relay/ntfy-topic.enc with the signing keystore (was it encrypted with this keystore?)"; exit 1; }
+            rm -f "$k"
+            cp .github/relay/log-x25519.pub "$d/log-x25519.pub"
+          fi
+          grep -qE '^[A-Za-z0-9_-]{16,64}$' "$d/ntfy-topic" || { echo "::error::the relay topic is malformed"; exit 1; }
+          echo "::add-mask::$(cat "$d/ntfy-topic")"   # keep the decrypted topic out of the run logs
+          [ -s "$d/log-x25519.pub" ] || { echo "::error::no relay public key"; exit 1; }
           echo "RELAY_NOTE=Debug build: the debug log relay is on and sends the app's log, encrypted, to the developer (see the README)." >> "$GITHUB_ENV"
 
       - name: Build, lint, unit tests, APK check

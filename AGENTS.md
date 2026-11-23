@@ -390,10 +390,14 @@ Repository secrets (Settings → Secrets and variables → Actions):
 - `ANDROID_DEBUG_KEYSTORE_B64` (required): `base64 -w0 ~/.android/debug.keystore` of the
   maintainer's machine. Every release must be signed with this one key: a different key means
   the update does not install over the previous one, and uninstalling deletes the node identity.
-- `GVPNDROID_NTFY_TOPIC` and `GVPNDROID_LOG_X25519_PUB` (required since 0.0.4, owner decision
-  2026-11-22: releases are test builds with logging on): the contents of `ntfy-topic` and
-  `log-x25519.pub`. The workflow refuses to build without them. Published APKs are public if the
-  repository is, and so is the topic inside them.
+- The debug log relay (always on in releases since 0.0.4, owner decision 2026-11-22). The
+  workflow takes the topic and public key from the secrets `GVPNDROID_NTFY_TOPIC` and
+  `GVPNDROID_LOG_X25519_PUB` if both exist, otherwise from `.github/relay/`:
+  `log-x25519.pub` as is, and `ntfy-topic.enc`, the topic encrypted with the SHA-256 of the
+  signing keystore file (`openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -a`, key from a file,
+  never a command line). It refuses to build without a relay. A new keystore or a new topic means
+  re-encrypting `ntfy-topic.enc`. Published APKs are public if the repository is, and so is the
+  topic inside them.
 
 When the client or the gnosisvpn package moves: update `CLIENT_REV` (and `CLIENT_REPO`) in `run.sh` (the workflow
 follows it) and `GNOSISVPN_DEB` / `GNOSISVPN_DEB_SHA256` in the workflow. The apt pool keeps only
