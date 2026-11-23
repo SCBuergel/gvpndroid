@@ -5,7 +5,8 @@ import java.io.File
 /**
  * Developer screen toggle: the vpn-lab's exits, which the network does not announce, pinned into
  * gnosis.toml as extra [destinations] next to the discovered ones. Nothing else changes: no relay
- * allowlist, the 1-hop path the lab's Linux clients use, so the core treats them like any other exit. The block is marked so it
+ * allowlist, the 1-hop path the lab's Linux clients use, so the core treats them like any other exit,
+ * except that it pays them through the relayer side-car (label sidecar = "on"). The block is marked so it
  * can be removed again; the flag survives app updates (GnosisSetup.enable re-applies it).
  */
 object LabExits {
@@ -37,7 +38,8 @@ object LabExits {
                 append("[destinations.${it.key}]\n")
                 append("address = \"${it.address}\"\n")
                 append("path = { hops = 1 }\n")
-                append("meta = { name = \"${it.name}\", location = \"${it.location}\" }\n\n")
+                // sidecar = "on": both lab exits allow the Curvy relayer as a session target (rust/patches: android_sidecar)
+                append("meta = { name = \"${it.name}\", location = \"${it.location}\", sidecar = \"on\" }\n\n")
             }
             append(END).append('\n')
         }

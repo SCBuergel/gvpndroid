@@ -94,18 +94,19 @@ index a8f5221e..7b0b1085 100644
  
  #[cfg(test)]
 diff --git a/gnosis_vpn-lib/src/connection/up/runner.rs b/gnosis_vpn-lib/src/connection/up/runner.rs
-index 701e02e7..0cf0ab36 100644
+index 701e02e7..79436779 100644
 --- a/gnosis_vpn-lib/src/connection/up/runner.rs
 +++ b/gnosis_vpn-lib/src/connection/up/runner.rs
-@@ -133,7 +133,14 @@ impl Runner {
+@@ -133,7 +133,15 @@ impl Runner {
          // 5b. give the payment relayer its own unpaid session through this exit. The deposit for the
          //     session opened next must not depend on that session: the exit holds its traffic back once
          //     the free allowance is used up, and the relayer's answers would be held back with it.
 -        let paid_through_sidecar = open_relayer_sidecar(&self.hopr, &self.destination, &self.options).await;
 +        //     Android: the app is excluded from its own VPN, so the relayer is reached directly and never
-+        //     through the tunnel. No side-car (exits must allow it as a target), but the hold below still
-+        //     keeps the user's traffic off the exit's free allowance until the first payment is seen.
-+        let paid_through_sidecar = if cfg!(target_os = "android") {
++        //     through the tunnel. The side-car only where the app asks for it (android_sidecar), because
++        //     most exits do not allow it as a target; the hold below runs either way and keeps the
++        //     user's traffic off the exit's free allowance until the first payment is seen.
++        let paid_through_sidecar = if cfg!(target_os = "android") && !android_sidecar(&self.destination) {
 +            true
 +        } else {
 +            open_relayer_sidecar(&self.hopr, &self.destination, &self.options).await
@@ -113,6 +114,18 @@ index 701e02e7..0cf0ab36 100644
  
          // 6. open the wg session (also carries the in-tunnel verification ping). The
          //    raw session is spliced directly into the pump - no local listener and no
+@@ -729,3 +737,11 @@ mod tests {
+         );
+     }
+ }
++
++/// Android: whether to pay through the relayer side-car for [dest]. Yes when the app set
++/// `GNOSISVPN_ANDROID_SIDECAR=all` (developer screen), or when the configuration pinned the exit
++/// with the label `sidecar = "on"` (the lab exits, which allow the relayer as a session target).
++fn android_sidecar(dest: &Destination) -> bool {
++    std::env::var("GNOSISVPN_ANDROID_SIDECAR").is_ok_and(|v| v == "all")
++        || dest.meta.other.get("sidecar").is_some_and(|v| v == "on")
++}
 diff --git a/gnosis_vpn-lib/src/core/mod.rs b/gnosis_vpn-lib/src/core/mod.rs
 index cdc78929..4a5393d2 100644
 --- a/gnosis_vpn-lib/src/core/mod.rs

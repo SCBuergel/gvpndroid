@@ -113,6 +113,12 @@
             android:text="Send logs now" />
     </LinearLayout>
 
+    <Button
+        android:id="@+id/sidecarButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Side-car: lab exits" />
+
     <LinearLayout
         android:id="@+id/fundingBox"
         android:layout_width="match_parent"

@@ -81,9 +81,14 @@ country, so you can tell exits in the same country apart.
 - **Log level** cycles normal, verbose and debug for the app and the core.
 - **Send logs now** sends everything logged so far to the developer at once, instead of waiting
   for the relay's schedule. The result shows in the log below it.
+- **Side-car** chooses where the core pays the exit through a separate, unpaid session to the
+  payment relayer (the "side-car"): "lab exits" (default) or "all exits". Most exits don't allow
+  that session yet; on one that doesn't, a connect waits about 150 s and then goes ahead without
+  it. Takes effect from the next connect.
 - **Lab exits** (off by default) adds the vpn-lab's two test exits, "Lab exit Frankfurt" and
   "Lab exit New York", to the exit list. The network does not announce them, so they are
-  pinned by address; everything else, including relay choice, stays as normal. Disconnect
+  pinned by address and paid through the side-car (both allow it); everything else, including
+  relay choice, stays as normal. Disconnect
   before switching it: the core restarts to read the change. These are temporary machines
   (Frankfurt until 2026-11-23 22:30 UTC, New York until 2026-11-24 22:35 UTC).
 

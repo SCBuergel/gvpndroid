@@ -215,12 +215,15 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     private fun startCoreOnce(props: Properties) {
         if (coreRunning) return
         GnosisNative.loadError?.let { error("native core not available: $it") }
+        // A lab block from an older version is brought up to date (LabExits.apply is idempotent).
+        if (LabExits.isOn(dir)) File(dir, "gnosis.toml").let { f -> LabExits.apply(f.readText(), true).let { if (it != f.readText()) f.writeText(it) } }
         val config = File(dir, "gnosis.toml").readText()
         val data = File(dir, "gnosis").apply { mkdirs() }
         val cache = File(context.cacheDir, "gnosis").apply { mkdirs() }
         val level = LogLevel.get(context)
         LogBuffer.log("gnosis: starting core (${GnosisNative.version()}), log level ${level.name.lowercase()}")
         GnosisNative.initAndroid(context.applicationContext)
+        Sidecar.apply(dir)
         GnosisNative.setLogFilter(level.coreFilter)
         val blokli = props.getProperty("blokli_url") ?: error("gnosis.properties has no blokli_url")
         val network = props.getProperty("network") ?: error("gnosis.properties has no network")

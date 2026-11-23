@@ -195,10 +195,13 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
     adds a `RelayerRoute` to the payment pool;
   - on desktop the core opens an extra, unpaid session to the exit for the Curvy relayer
     (`api.curvy.box:443`), because there the relayer's traffic would otherwise go through the
-    tunnel the exit holds until it is paid. **Our patch turns the side-car off on Android**
-    (`connection/up/runner.rs`, step 5b): the app is excluded from its own VPN, so the relayer is
-    reached directly anyway, and no production exit is known to allow that target (one without
-    it makes every relayer request fail until the 150 s fallback);
+    tunnel the exit holds until it is paid. **Our patch uses the side-car on Android only where
+    asked** (`connection/up/runner.rs`, step 5b, `android_sidecar`): for exits pinned with the
+    label `sidecar = "on"` (the lab exits, `LabExits.kt`), or for every exit when the app sets
+    `GNOSISVPN_ANDROID_SIDECAR=all` (developer screen, `Sidecar.kt`, via `Os.setenv` before the core
+    starts; read at each connect). Elsewhere the app's own traffic bypasses its VPN, so the relayer
+    is reached directly, and most exits don't allow that target (one without it makes every
+    relayer request fail until the 150 s fallback);
   - the core holds the tunnel back until the first deposit is made, plus a fixed 22 s for the
     exit to see it, so the user's traffic does not stop at the exit's free allowance (about
     14 MB). No hold if no payment is asked for within 10 s; after 150 s without a deposit it
