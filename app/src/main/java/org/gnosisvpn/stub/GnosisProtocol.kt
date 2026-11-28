@@ -152,17 +152,43 @@ object GnosisProtocol {
     private fun str(o: JSONObject, k: String) = o.takeIf { it.has(k) && !it.isNull(k) }?.optString(k)?.takeIf { it.isNotEmpty() }
 
     /**
-     * The connect phases in order (ConnectPhase), with readable names. opening_ping also covers the
-     * core's hold until the first payment is made (about 40 s; the core reports no phase of its own).
+     * The connect steps as people see them (IPC v6 ConnectStep), in order, ending with connected.
+     * The core holds user traffic from "opening_tunnel" until the exit has seen the payment
+     * (paying, then verifying): the tun exists then, but only the core's pings to the gateway pass.
      */
-    val CONNECT_PHASES = listOf(
-        "init" to "Starting", "gather_peer_ips" to "Finding relays", "killswitch_lockdown" to "Blocking traffic outside the VPN",
-        "generating_wg" to "Creating your keys", "register_wg" to "Registering with the exit", "opening_ping" to "Opening the route and paying the exit",
-        "establish_wg_tunnel" to "Securing the tunnel", "verify_ping" to "Checking the tunnel", "adjust_to_main" to "Moving to the main route",
-        "connection_established" to "Connected",
+    val CONNECT_STEPS = listOf(
+        "checking_exit" to "Checking the exit", "securing" to "Securing the connection", "opening_tunnel" to "Opening the tunnel",
+        "paying" to "Paying the exit", "verifying" to "Checking the tunnel", "connected" to "Connected",
     )
 
-    private val CARRYING = setOf("verify_ping", "adjust_to_main", "connection_established")
+    /** ConnectPhase to step, for a reconnect the core reports without a step. */
+    private val PHASE_STEP = mapOf(
+        "init" to "checking_exit", "gather_peer_ips" to "checking_exit", "killswitch_lockdown" to "securing",
+        "generating_wg" to "securing", "register_wg" to "securing", "opening_ping" to "opening_tunnel",
+        "establish_wg_tunnel" to "opening_tunnel", "awaiting_payment" to "paying", "verify_ping" to "verifying",
+    )
+
+    /** Phases in which the tunnel already carries user traffic: the core only tunes the session. */
+    private val CARRYING = setOf("adjust_to_main", "connection_established")
+
+    /**
+     * What holds a connect up (IPC v6 ConnectIssue: kind and attempts in a row), said for people;
+     * null while it progresses. The core keeps retrying by itself.
+     */
+    fun connectIssue(o: JSONObject?): String? {
+        o ?: return null
+        val text = when (o.optJSONObject("kind")?.optString("type")) {
+            "exit_unreachable" -> "Can’t reach the exit right now."
+            "payment_route_unavailable" -> "The exit doesn’t open the route to the payment service."
+            "registration_failed" -> "The exit didn’t accept the registration."
+            "payment_failed" -> "The payment didn’t go through."
+            "insufficient_funds" -> return "Not enough funds to pay this exit. Top up your wallet, or pick another exit."
+            "tunnel_unverified" -> "The tunnel doesn’t answer yet."
+            else -> "This is taking longer than usual."
+        }
+        val attempts = o.optInt("attempts", 0)
+        return if (attempts > 1) "$text Retrying (attempt $attempts)." else "$text Retrying."
+    }
 
     /** The session from a status `data` object (connection), or null while disconnected. */
     fun session(data: JSONObject): Tunnel.Session? {
@@ -170,15 +196,21 @@ object GnosisProtocol {
         val type = c.optString("type")
         if (type == "disconnected" || type.isEmpty()) return null
         val phase = c.optJSONObject("phase")?.optString("type")
-        val idx = CONNECT_PHASES.indexOfFirst { it.first == phase }.takeIf { it >= 0 }
+        val carrying = type == "connected" || (type == "connecting" && phase in CARRYING)
+        val stepObj = c.optJSONObject("step")
+        val stepType = if (carrying) "connected" else stepObj?.optString("type") ?: PHASE_STEP[phase]
+        val idx = CONNECT_STEPS.indexOfFirst { it.first == stepType }.takeIf { it >= 0 }
+        val name = when {
+            stepType == "paying" && stepObj?.optJSONObject("payment")?.optString("type") == "sent" -> "Payment sent, waiting for the exit to see it"
+            else -> idx?.let { CONNECT_STEPS[it].second }
+        }
         val pix = c.optJSONObject("pix")
         val stall = c.optJSONObject("stall")
         fun long(o: JSONObject?, k: String) = o?.takeIf { it.has(k) && !it.isNull(k) }?.optLong(k)
         return Tunnel.Session(
             exitId = c.optString("destination"), sinceMs = c.optLong("since"),
-            // From verify_ping on the tunnel and its routes carry traffic; the core only checks the
-            // exit's ping and tunes the session. Shown as connected (as gvpndows does).
-            step = if (type == "connected" || (type == "connecting" && phase in CARRYING)) CONNECT_PHASES.size - 1 else idx, steps = CONNECT_PHASES.size, stepName = idx?.let { CONNECT_PHASES[it].second },
+            step = idx, steps = CONNECT_STEPS.size, stepName = name,
+            issue = if (carrying) null else connectIssue(c.optJSONObject("issue")),
             pingMs = long(c, "tunnel_ping_rtt")?.toInt(),
             chunkBytes = long(pix, "chunk_bytes"), bytesLeft = long(pix, "bytes_left"), bytesSpent = long(pix, "bytes_spent"),
             bytesBought = long(pix, "bytes_bought"), cost = pix?.optString("cost")?.let { token(it) },

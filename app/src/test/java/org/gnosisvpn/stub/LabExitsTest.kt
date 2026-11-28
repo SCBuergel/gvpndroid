@@ -15,41 +15,51 @@ class LabExitsTest {
     @get:Rule val tmp = TemporaryFolder()
     private val base = "version = 7\ngeoip_db = \"/g\"\n\n[pix_strategy]\nprice_per_byte = \"1 wei wxHOPR\"\n"
 
+    private val sample = listOf(LabExits.Exit("lab", "0xa532c96b39275210a3756c93f84338bd4661a55d", "Lab exit Frankfurt", "vpn-lab"))
+    private val oldBlock = "\n# --- lab exits (developer screen toggle) ---\n[destinations.lab]\naddress = \"0xa532c96b39275210a3756c93f84338bd4661a55d\"\n" +
+        "path = { hops = 1 }\nmeta = { name = \"Lab exit Frankfurt\", location = \"vpn-lab\", sidecar = \"on\" }\n\n# --- end lab exits ---\n"
+
     @Test fun onAddsEveryLabExitAsAPlainDestination() {
-        val on = LabExits.apply(base, true)
+        val on = LabExits.apply(base, true, sample)
         assertTrue(on.startsWith(base.trimEnd('\n')))
-        LabExits.EXITS.forEach {
+        sample.forEach {
             assertTrue(on.contains("[destinations.${it.key}]\naddress = \"${it.address}\"\npath = { hops = 1 }\n"))
             assertTrue(on.contains("name = \"${it.name}\""))
-            assertTrue("lab exits ask for the side-car", on.contains("sidecar = \"on\""))
         }
-        // "completely normal fashion": no relay allowlist or channel strategy comes with it
-        assertFalse(on.contains("channel_allowlist")); assertFalse(on.contains("[strategy"))
+        // "completely normal fashion": no relay allowlist, channel strategy or label comes with it
+        assertFalse(on.contains("channel_allowlist")); assertFalse(on.contains("[strategy")); assertFalse(on.contains("sidecar"))
     }
 
     @Test fun offRestoresTheConfigAndOnIsIdempotent() {
-        val on = LabExits.apply(base, true)
-        assertEquals(on, LabExits.apply(on, true))
-        assertEquals(base.trimEnd('\n'), LabExits.apply(on, false).trimEnd('\n'))
-        assertEquals(base, LabExits.apply(base, false))
+        val on = LabExits.apply(base, true, sample)
+        assertEquals(on, LabExits.apply(on, true, sample))
+        assertEquals(base.trimEnd('\n'), LabExits.apply(on, false, sample).trimEnd('\n'))
+        assertEquals(base, LabExits.apply(base, false, sample))
     }
 
     @Test fun anOlderLabBlockIsReplacedNotDuplicated() {
-        val old = base + "\n# --- lab exits (developer screen toggle) ---\n[destinations.lab]\naddress = \"0xa532c96b39275210a3756c93f84338bd4661a55d\"\n# --- end lab exits ---\n"
-        val now = LabExits.apply(old, true)
+        val now = LabExits.apply(base + oldBlock, true, sample)
         assertEquals(1, Regex("""\[destinations\.lab]""").findAll(now).count())
-        assertTrue(now.contains("sidecar = \"on\""))
+        assertFalse("the side-car label of 0.0.5 is gone", now.contains("sidecar"))
     }
 
-    @Test fun setWritesOnlyAValidConfigAndKeepsTheFlag() {
+    /** No lab exits exist now: an install that had them on gets the block removed at the next core start. */
+    @Test fun withoutLabExitsTheToggleIsOffAndAnOldBlockIsDropped() {
+        assertTrue(LabExits.EXITS.isEmpty())
+        assertEquals(base.trimEnd('\n'), LabExits.apply(base + oldBlock, true).trimEnd('\n'))
+        val nb = tmp.newFolder()
+        File(nb, "gnosis.toml").writeText(base + oldBlock)
+        File(nb, "lab-exits-on").writeText("")
+        assertFalse(LabExits.isOn(nb))
+        assertNull(LabExits.set(nb, true) { null })
+        assertFalse(LabExits.isOn(nb)); assertFalse(File(nb, "gnosis.toml").readText().contains("destinations"))
+    }
+
+    @Test fun setWritesOnlyAValidConfig() {
         val nb = tmp.newFolder()
         assertNotNull(LabExits.set(nb, true) { null })           // no gnosis.toml yet
         File(nb, "gnosis.toml").writeText(base)
         assertNotNull(LabExits.set(nb, true) { "bad" })          // rejected: nothing changes
-        assertEquals(base, File(nb, "gnosis.toml").readText()); assertFalse(LabExits.isOn(nb))
-        assertNull(LabExits.set(nb, true) { null })
-        assertTrue(LabExits.isOn(nb)); assertTrue(File(nb, "gnosis.toml").readText().contains("[destinations.lab2]"))
-        assertNull(LabExits.set(nb, false) { null })
-        assertFalse(LabExits.isOn(nb)); assertFalse(File(nb, "gnosis.toml").readText().contains("destinations"))
+        assertEquals(base, File(nb, "gnosis.toml").readText())
     }
 }

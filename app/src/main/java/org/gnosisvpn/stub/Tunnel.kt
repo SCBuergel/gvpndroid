@@ -37,6 +37,8 @@ interface Tunnel {
     /** The live session as the backend reports it (data bought in chunks, paid from the wallet). */
     data class Session(
         val exitId: String, val sinceMs: Long, val step: Int? = null, val steps: Int = 0, val stepName: String? = null,
+        /** What holds the connect up right now, said for people (the core retries by itself). */
+        val issue: String? = null,
         val pingMs: Int? = null, val chunkBytes: Long? = null, val bytesLeft: Long? = null, val bytesSpent: Long? = null,
         val bytesBought: Long? = null, val cost: java.math.BigDecimal? = null, val emptyInSec: Long? = null,
         val payment: Payment? = null, val stalled: Boolean = false, val awaitingPayment: Boolean = false, val reconnecting: Boolean = false,

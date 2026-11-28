@@ -77,15 +77,9 @@ class MainActivity : Activity() {
                 DebugLogRelay.sendNow { result -> runOnUiThread { isEnabled = true; LogBuffer.log(result) } }
             }
         }
-        findViewById<Button>(R.id.sidecarButton).apply {
-            fun label() { text = "Side-car: ${Sidecar.label(noBackupFilesDir)}" }
-            label()
-            setOnClickListener {
-                Sidecar.set(noBackupFilesDir, !Sidecar.allExits(noBackupFilesDir)); label()
-                LogBuffer.log("side-car on ${Sidecar.label(noBackupFilesDir)} (from the next connect)")
-            }
-        }
         findViewById<Button>(R.id.labExitsButton).apply {
+            // Shown only while lab exits exist (LabExits.EXITS).
+            visibility = if (LabExits.EXITS.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
             fun label() { text = "Lab exits: ${if (LabExits.isOn(noBackupFilesDir)) "on" else "off"}" }
             label()
             setOnClickListener { toggleLabExits(); label() }

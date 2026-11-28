@@ -12,7 +12,7 @@ import java.math.BigDecimal
 
 /**
  * What the UI shows comes from these parsers: exit health, the session with its data chunks, the
- * wallet and start-up steps. Samples follow client c768ccf1's IPC v5 types
+ * wallet and start-up steps. Samples follow client e816fe16's IPC v6 types
  * (gnosis_vpn-ipc protocol.rs); the running status is a real reply from tests/protocol.json.
  */
 class GnosisLiveDataTest {
@@ -57,7 +57,7 @@ class GnosisLiveDataTest {
     @Test fun sessionWhileConnecting() {
         val s = GnosisProtocol.session(status("""{"type":"connecting","destination":"gvpn-ger-1-j9os","since":1794944505000,"phase":{"type":"register_wg"},"pix":null}"""))!!
         assertEquals("gvpn-ger-1-j9os", s.exitId)
-        assertEquals(4, s.step); assertEquals("Registering with the exit", s.stepName)
+        assertEquals(1, s.step); assertEquals("Securing the connection", s.stepName); assertNull(s.issue)
         assertFalse(s.reconnecting)
     }
 
@@ -149,11 +149,28 @@ class GnosisLiveDataTest {
         assertEquals("The Gnosis VPN core did not answer.", GnosisProtocol.connectRefusal(null))
     }
 
-    @Test fun verifyPingCountsAsConnected() {
-        val s = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"verify_ping"},"pix":null}"""))!!
-        assertEquals(s.steps - 1, s.step)
+    /** IPC v6: the core holds user traffic until the exit answers its pings (verify_ping); only then it carries. */
+    @Test fun onlyAdjustToMainAndLaterCountAsConnected() {
+        val verifying = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"verify_ping"},"step":{"type":"verifying"},"issue":null,"pix":null}"""))!!
+        assertTrue(verifying.step!! < verifying.steps - 1); assertEquals("Checking the tunnel", verifying.stepName)
+        val adjusting = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"adjust_to_main"},"step":{"type":"verifying"},"issue":null,"pix":null}"""))!!
+        assertEquals(adjusting.steps - 1, adjusting.step)
         val early = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"establish_wg_tunnel"},"pix":null}"""))!!
-        assertTrue(early.step!! < early.steps - 1)
+        assertEquals("Opening the tunnel", early.stepName)
+    }
+
+    /** The core's paying step and its typed issue, from the fixture the crate checks against the client's types. */
+    @Test fun payingStepAndIssueFromTheFixture() {
+        val s = GnosisProtocol.session(fixture.getJSONObject("status_connecting_paying").getJSONObject("data"))!!
+        assertEquals(GnosisProtocol.CONNECT_STEPS.indexOfFirst { it.first == "paying" }, s.step)
+        assertEquals("Payment sent, waiting for the exit to see it", s.stepName)
+        assertEquals("The exit doesn’t open the route to the payment service. Retrying (attempt 2).", s.issue)
+        assertEquals(Tunnel.Payment.FUNDED, s.payment)
+        val requested = GnosisProtocol.session(status("""{"type":"connecting","destination":"x","since":1,"phase":{"type":"awaiting_payment"},"step":{"type":"paying","payment":{"type":"requested"}},"issue":null,"pix":null}"""))!!
+        assertEquals("Paying the exit", requested.stepName)
+        val broke = GnosisProtocol.connectIssue(JSONObject("""{"kind":{"type":"insufficient_funds"},"attempts":3}"""))
+        assertEquals("Not enough funds to pay this exit. Top up your wallet, or pick another exit.", broke)
+        assertNull(GnosisProtocol.connectIssue(null))
     }
 
     @Test fun theCoreGaveUpOnlyWithoutATarget() {

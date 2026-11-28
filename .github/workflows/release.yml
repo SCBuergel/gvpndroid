@@ -28,8 +28,8 @@ concurrency:
 
 env:
   # The official Gnosis VPN package the data files (config, geoip, PIX proving files) come from.
-  GNOSISVPN_DEB: gnosisvpn_1.1.0_amd64.deb
-  GNOSISVPN_DEB_SHA256: c944e294c408916d21a62e29262af52d5f0f66fe6715056d33c1f407559d7712
+  GNOSISVPN_DEB: gnosisvpn_1.2.0_amd64.deb
+  GNOSISVPN_DEB_SHA256: cecfdc87a7cd10ab46ebf0d3ed4933ed5635b4baa507cc85038ceeea56fc585a
   # SHA-256 of the signing certificate (not the key): a release signed with anything else would not
   # install over the previous one, so the workflow refuses it.
   SIGNING_CERT_SHA256: c25f91fb6e79d590ff9fd17db272bc12f0144d29917154cb0b201a524567fc72

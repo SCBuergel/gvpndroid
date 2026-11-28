@@ -7,8 +7,11 @@
 //! - `SetupTunnel` becomes an event for Kotlin, which builds the tun with `VpnService.Builder`
 //!   and hands the fd back through `tunReadyFor`, over the same fd-passing socket the desktop
 //!   worker uses;
-//! - the in-tunnel ping is answered as skipped: the app is excluded from its own VPN (so the
-//!   HOPR traffic does not loop), and a ping from it would bypass the tunnel.
+//! - the in-tunnel ping and the killswitch's tunnel stages act on the core's own pump
+//!   (gnosis_vpn_lib::wg_tunnel::tap, added by rust/patches): the app is excluded from its own
+//!   VPN (so the HOPR traffic does not loop), so a ping from it would bypass the tunnel, and an app
+//!   has no packet filter. The ping is what tells the core that the exit serves the session (it saw
+//!   the payment), and while the exit waits for it, only the gateway gets through.
 //!
 //! All calls return at once except `command`, which waits for the core's answer (call it off
 //! the main thread). Logs go to logcat, tag `gnosisvpn`.
@@ -29,6 +32,7 @@ use gnosis_vpn_lib::command::WorkerCommand;
 use gnosis_vpn_lib::core::Core;
 use gnosis_vpn_lib::event::{CoreToWorker, RequestToRoot, ResponseFromRoot, WorkerToCore};
 use gnosis_vpn_lib::socket;
+use gnosis_vpn_lib::wg_tunnel::tap;
 use gnosis_vpn_lib::worker_params::{AllowFlags, ConfigFileMode, SpawnParams, WorkerParams};
 use jni_sys::{jclass, jint, jlong, jstring, JNIEnv};
 use serde_json::json;
@@ -356,8 +360,9 @@ fn deliver(sender: mpsc::Sender<WorkerToCore>, response: ResponseFromRoot) {
 /// Plays the desktop root process for the requests of the core of `generation`.
 fn handle_request(generation: u64, request: RequestToRoot) {
     match request {
-        RequestToRoot::KillswitchLockdown { request_id, .. } => {
-            tracing::info!("kill switch: no-op on Android (use Always-on VPN)");
+        RequestToRoot::KillswitchLockdown { request_id, tunnel, .. } => {
+            // The system kill switch is Always-on VPN; the tunnel stage is applied in the pump.
+            tap::set_access(&tunnel);
             respond(generation, ResponseFromRoot::KillswitchLockdown { request_id, res: Ok(()) });
         }
         RequestToRoot::SetupTunnel { request_id, interface_address, mtu, dns, peer_ips, .. } => push_event(json!({
@@ -370,11 +375,15 @@ fn handle_request(generation: u64, request: RequestToRoot) {
             "peer_ips": peer_ips.len(),
         })),
         RequestToRoot::TearDownWg => push_event(json!({ "type": "teardown" })),
-        RequestToRoot::Ping { request_id, .. } => {
-            static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| tracing::warn!("in-tunnel pings are skipped: the app is excluded from its own VPN"));
-            tracing::debug!("in-tunnel ping skipped");
-            respond(generation, ResponseFromRoot::Ping { request_id, res: Ok(Duration::ZERO) });
+        RequestToRoot::Ping { request_id, options } => {
+            runtime().spawn(async move {
+                let res = tap::ping(options.address, options.timeout, options.seq_count).await;
+                match &res {
+                    Ok(rtt) => tracing::debug!(?rtt, "in-tunnel ping"),
+                    Err(error) => tracing::info!(%error, "in-tunnel ping failed"),
+                }
+                respond(generation, ResponseFromRoot::Ping { request_id, res });
+            });
         }
         RequestToRoot::UpdatePeerIps { peer_ips } => tracing::debug!(n = peer_ips.len(), "peer ips (not needed on Android)"),
         RequestToRoot::ProbeStopped => tracing::debug!("probe stopped"),
@@ -704,7 +713,7 @@ mod tests {
     #[test]
     fn status_samples_are_responses() {
         let f = fixture();
-        for key in ["status_running", "status_preparing_safe", "status_warmup_issue"] {
+        for key in ["status_running", "status_preparing_safe", "status_warmup_issue", "status_connecting_paying"] {
             let parsed: Result<Response, _> = serde_json::from_value(f[key].clone());
             assert!(parsed.is_ok(), "{key} is not a Response: {parsed:?}");
             // Round trip: what the bridge sends Kotlin keeps the fields the app reads.
@@ -716,6 +725,13 @@ mod tests {
         let w = serde_json::to_value(serde_json::from_value::<Response>(f["status_warmup_issue"].clone()).unwrap()).unwrap();
         assert_eq!(w["data"]["run_mode"]["issue"]["kind"]["type"], "unreachable");
         assert!(w["data"]["run_mode"]["issue"]["message"].is_string());
+        // GnosisProtocol.session reads connection.step.type, step.payment.type and issue.kind.type (IPC v6).
+        let p = serde_json::to_value(serde_json::from_value::<Response>(f["status_connecting_paying"].clone()).unwrap()).unwrap();
+        let c = &p["data"]["connection"];
+        assert_eq!(c["step"]["type"], "paying");
+        assert_eq!(c["step"]["payment"]["type"], "sent");
+        assert_eq!(c["issue"]["kind"]["type"], "payment_route_unavailable");
+        assert_eq!(c["issue"]["attempts"], 2);
     }
 
     /// A request of an earlier core is never answered into a later one (request ids restart).

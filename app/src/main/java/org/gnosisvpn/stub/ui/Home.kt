@@ -314,6 +314,7 @@ private fun ConnectingSlot(eng: Engine) {
             }
             Text(eng.connectStep() ?: steps[st], style = T.ql, color = p.on, modifier = Modifier.weight(1f))
         }
+        eng.connectIssue()?.let { Text(it, style = T.ql, color = p.warn) }
         Lin(prog)
     }
 }

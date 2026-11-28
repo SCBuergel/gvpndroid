@@ -18,6 +18,8 @@ class LogLevelTest {
     fun everyLevelMutesPathSelectionChatter() {
         // Path-selection errors flood the log by the million if not muted.
         // They are logged at ERROR, so a "warn" base level alone does not mute them.
-        LogLevel.entries.forEach { assertTrue(it.name, it.coreFilter.split(",").contains("hopr_transport::path=off")) }
+        // PATHS is the one exception: chosen by hand to see which relays the paths use (lab tests).
+        LogLevel.entries.filter { it != LogLevel.PATHS }.forEach { assertTrue(it.name, it.coreFilter.split(",").contains("hopr_transport::path=off")) }
+        assertTrue(LogLevel.PATHS.coreFilter.split(",").contains("hopr_transport::path=debug"))
     }
 }

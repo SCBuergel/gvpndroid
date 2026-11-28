@@ -627,6 +627,8 @@ open class Engine {
     open fun syncStep(): String? = null
     /** Text of the connect stage; null = the prototype's four timed steps. */
     open fun connectStep(): String? = null
+    /** What holds the connect up, shown under the stage; null while it progresses. */
+    open fun connectIssue(): String? = null
     /** The short id after the country name. */
     open fun exitTag(e: Exit): String = xid(e.id)
     /** The exit's own name ("GVPN-GER-1", "Lab exit Frankfurt") when it says more than the country. */

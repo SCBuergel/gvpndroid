@@ -23,24 +23,28 @@ Android only lets an app route traffic through a VPN by giving it a tun interfac
 `VpnService`. On the desktop, a separate root process creates the tun and installs a firewall
 for the core. On Android, the app takes that job:
 
-1. **The app starts the core in its own process.** The core is gnosis_vpn-client (pinned commit,
-   IPC v5; since 0.0.3 a fork commit with draft fixes for payment stalls, see `AGENTS.md`) with
-   a small Android patch, compiled to `libgnosisvpn.so`. A Rust
+1. **The app starts the core in its own process.** The core is gnosis_vpn-client (a pinned
+   upstream commit, IPC v6, see `AGENTS.md`) with a small Android patch, compiled to
+   `libgnosisvpn.so`. A Rust
    bridge crate exposes it to Kotlin over JNI. The app talks to the core with the same JSON
    commands and status messages the desktop CLI uses.
 2. **The core runs the HOPR node.** It discovers exits, opens a channel and a session to the
    chosen exit, and buys data in chunks with PIX payments from the node's Safe.
 3. **When the session is ready, the core asks for a tun.** The app gets one from Android's
    `VpnService` and hands its file descriptor to the core. The core then runs WireGuard over
-   the HOPR session through that tun.
+   the HOPR session through that tun. Until the exit has seen the payment for the session, the
+   core lets only its own pings to the exit's gateway through, so "Connecting" lasts until
+   traffic really flows; the app shows the core's step (for example "Payment sent, waiting for
+   the exit to see it") and what holds it up, if anything.
 4. **Android enforces the kill switch.** Instead of the desktop firewall, the app relies on
    Android's Always-on VPN with "Block connections without VPN" ("Lockdown" in the app). An
    app can't turn that on by itself, so the app links to the system setting and shows whether
    it is on.
 
 The app itself is excluded from its own VPN, so the core's HOPR traffic goes out directly.
-One consequence: the core can't run its in-tunnel health ping, so an idle tunnel may reconnect
-now and then.
+A ping from the app would therefore bypass the tunnel, so the core pings the exit's gateway from
+inside its own WireGuard pump instead: that is how it learns that the exit has seen the payment,
+and how it checks the tunnel afterwards.
 
 A second backend, plain WireGuard to a fixed server, sits behind the same interface. It exists
 to tell Android VPN problems apart from HOPR problems; the UI does not depend on which backend
@@ -78,19 +82,12 @@ country, so you can tell exits in the same country apart.
 
 **Developer screen** (Settings → Developer screen), for testing:
 
-- **Log level** cycles normal, verbose and debug for the app and the core.
+- **Log level** cycles normal, verbose, paths (verbose plus the relays each path uses) and debug
+  for the app and the core.
 - **Send logs now** sends everything logged so far to the developer at once, instead of waiting
   for the relay's schedule. The result shows in the log below it.
-- **Side-car** chooses where the core pays the exit through a separate, unpaid session to the
-  payment relayer (the "side-car"): "lab exits" (default) or "all exits". Most exits don't allow
-  that session yet; on one that doesn't, a connect waits about 150 s and then goes ahead without
-  it. Takes effect from the next connect.
-- **Lab exits** (off by default) adds the vpn-lab's two test exits, "Lab exit Frankfurt" and
-  "Lab exit New York", to the exit list. The network does not announce them, so they are
-  pinned by address and paid through the side-car (both allow it); everything else, including
-  relay choice, stays as normal. Disconnect
-  before switching it: the core restarts to read the change. These are temporary machines
-  (Frankfurt until 2026-11-23 22:30 UTC, New York until 2026-11-24 22:35 UTC).
+- **Lab exits** adds the vpn-lab's test exits to the exit list. It is hidden while no lab exits
+  exist, as now: the Frankfurt and New York lab exits were deleted on 2026-11-23 and 2026-11-24.
 
 Disconnect before installing an update.
 
@@ -146,7 +143,6 @@ as a release when a `v0.0.N` tag is pushed.
   every published APK is a debug build (with the log relay described above, when it is enabled
   for that release; the release notes say whether it is).
 - No core for 32-bit ARM phones.
-- No in-tunnel health ping (see [How it works](#how-it-works)), so idle tunnels may reconnect.
 - In November 2026 a multi-agent review of the whole code base went through 25 review passes
   and fixed 47 findings: 1 High, 13 Medium, 31 Low, 2 Info. The High was the core leaving its
   HOPR node running after it stopped by itself. Behaviour on real devices after those fixes

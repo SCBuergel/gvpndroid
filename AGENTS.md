@@ -54,7 +54,7 @@ sync when behaviour it describes changes, but put implementation detail here.
 - **Test naming:** regression tests are named after their finding, for example
   `R2_4StartRetryTest.kt`, one file per finding.
 - **Contract tests:**
-  - `GnosisLiveDataTest` checks the parsers against client c768ccf1's IPC v5 types;
+  - `GnosisLiveDataTest` checks the parsers against client e816fe16's IPC v6 types;
   - `GnosisEngineTest` drives the engine over a fake tunnel;
   - `EngineTest` keeps the shared state machine on the UI prototype's rules.
 
@@ -113,7 +113,8 @@ The UI never needs to know which backend it talks to.
 - **`LabExits.kt`:** the developer toggle that pins the vpn-lab's unannounced exits into
   `gnosis.toml` as `[destinations.lab*]` (1 hop, a name, nothing else: no relay allowlist), in a
   marked block it can remove again, then restarts the core. `GnosisSetup.enable` re-applies it.
-  The exits are temporary; drop them from `EXITS` once the lab machines are gone.
+  The exits are temporary; drop them from `EXITS` once the lab machines are gone. `EXITS` is empty
+  now: the toggle is hidden, and every core start removes a lab block an earlier version wrote.
 
 A fresh install sets up the Gnosis backend by itself, using the data files from the APK. A
 WireGuard choice on the developer screen is kept across restarts. The Gnosis backend is used
@@ -173,43 +174,43 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
   with `rust/patches/0001-android-target.patch` applied. It plays the part of the
   desktop root process:
   - the tun comes from `GnosisVpnService`;
-  - the kill switch is Android's Always-on VPN;
-  - in-tunnel pings are skipped, because the app is excluded from its own VPN.
+  - the system kill switch is Android's Always-on VPN;
+  - the in-tunnel ping and the killswitch's tunnel stages act on the core's own pump
+    (`wg_tunnel::tap`, from the patch), because the app is excluded from its own VPN and has no
+    packet filter.
 
   Tun file descriptors go only to the core that asked for one. Descriptors no core took are
   closed when the tun is closed for good (`dropQueuedTuns`), and the core's receive gives up
   after 5 s.
 - **The patch:**
-  - It adds Android support (`killswitch/android.rs`).
+  - It adds Android support: the `cfg` lines for `target_os = "android"`, and
+    `killswitch/android.rs` (no-op policies).
+  - It adds `gnosis_vpn-lib/src/wg_tunnel/tap.rs`, which wraps the pump's tun reader and writer
+    on Android (`connection/up/runner.rs`, step 7). `tap::ping` injects ICMP echo requests to the
+    WireGuard gateway into the pump and takes the replies out before they reach Android.
+    `tap::set_access` applies the killswitch stages: while `GatewayOnly`, packets from Android to
+    anyone but the gateway are dropped. The bridge routes the core's `Ping` and
+    `KillswitchLockdown` requests to them.
   - It makes `Core::start` shut the node down on every return, because in the app no process
     exit does that.
   - Its `Cargo.lock` adds the bridge crate's entry (`build-remote.sh` builds `--locked`).
-  - It moves hopr-strategy (`[patch.crates-io]` and its one `Cargo.lock` source line) to
-    SCBuergel/hopr-strategy d6ad33ff: the Curvy pool retries the note lookup after the relayer
-    reports a deposit, instead of dropping a deposit Blokli has not indexed yet.
+- **The client commit (since 0.0.6):** upstream gnosis/gnosis_vpn-client main `e816fe16` (v1.2.1,
+  IPC v6), with no fork commits. It contains the fixes we drafted for payment stalls in their
+  merged form:
+  - **The relayer side-car (#1089):** each connect first opens a free session to the Curvy
+    relayer through the same exit, and the PIX pool sends its relayer calls there (edgli
+    `relayer_via`). Deposits are held until it is open. An exit that refuses the relayer as a
+    target fails the attempt (issue `payment_route_unavailable`).
+  - **The payment hold (#1090):** after the pump is up only the gateway gets through; the core
+    pings it until the exit answers, which under strict prepay means it has seen the deposit
+    (phase `awaiting_payment`/`verify_ping`, step `paying`). Then user traffic is let through.
+    On Android both run through the tap above, so the app shows the core's `step` and `issue`
+    and counts the session as connected only from `adjust_to_main` on.
+  - **The probe session's SURB balancing and ACK retransmission (#1085).** Don't add
+    retransmission to `[connection.bridge] capabilities` in the config: in the lab it starved the
+    exit's probe sessions of SURBs and stalled all of the exit's egress for 1 s at a time.
 
-- **The client commit (since 0.0.3):** `c768ccf1` of the fork SCBuergel/gnosis_vpn-client,
-  branch `sidecar-relayer-hold`: gnosis_vpn-client main e6b33f36 (v1.1.1, IPC v5) plus three
-  draft commits for payment stalls (gnosis/gnosis_vpn-client#1075 and #1076):
-  - edgli points at SCBuergel/edge-client `sidecar-relayer` (hoprnet/edge-client#276), which
-    adds a `RelayerRoute` to the payment pool;
-  - on desktop the core opens an extra, unpaid session to the exit for the Curvy relayer
-    (`api.curvy.box:443`), because there the relayer's traffic would otherwise go through the
-    tunnel the exit holds until it is paid. **Our patch uses the side-car on Android only where
-    asked** (`connection/up/runner.rs`, step 5b, `android_sidecar`): for exits pinned with the
-    label `sidecar = "on"` (the lab exits, `LabExits.kt`), or for every exit when the app sets
-    `GNOSISVPN_ANDROID_SIDECAR=all` (developer screen, `Sidecar.kt`, via `Os.setenv` before the core
-    starts; read at each connect). Elsewhere the app's own traffic bypasses its VPN, so the relayer
-    is reached directly, and most exits don't allow that target (one without it makes every
-    relayer request fail until the 150 s fallback);
-  - the core holds the tunnel back until the first deposit is made, plus a fixed 22 s for the
-    exit to see it, so the user's traffic does not stop at the exit's free allowance (about
-    14 MB). No hold if no payment is asked for within 10 s; after 150 s without a deposit it
-    connects without the hold. On Android the hold always runs. The core reports `opening_ping`
-    the whole time, so the app names that step "Opening the route and paying the exit".
-
-  The pinned hoprnet already contains the transport fix ff0076ef the patch used to add. Go back
-  to upstream gnosis/gnosis_vpn-client once these drafts or their replacements are merged.
+  hopr-strategy 10.0.0 already has our note-lookup retry (hoprnet/hopr-strategy#170).
 - **Bumping the client:**
   1. Regenerate the patch against the new commit.
   2. Update `CLIENT_REV`, and `CLIENT_REPO` if the commit is not on gnosis/gnosis_vpn-client.
@@ -223,8 +224,7 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
 - **Identity:** the node identity lives in `no_backup/gnosis/`. A new node shows its address as
   a QR code while it waits for funds.
 
-Not covered yet: 32-bit ARM phones get no Rust core (WireGuard only). Because the in-tunnel
-health ping is skipped, idle tunnels may reconnect.
+Not covered yet: 32-bit ARM phones get no Rust core (WireGuard only).
 
 ## Building
 

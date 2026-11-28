@@ -270,7 +270,9 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
                     // A reconnect is a reconnect, also when the exit is unreachable for now (a network
                     // change looks the same): the core keeps trying; the app invents no "offline, data lost".
                     s.reconnecting -> Conn.RECONNECTING
-                    s.step != null && s.step < s.steps - 1 && !s.stalled && tn.state != Tunnel.State.CONNECTED -> Conn.CONNECTING
+                    // Connecting until the core lets user traffic through, also while the tun already exists
+                    // (the core holds traffic in it until the exit has seen the payment).
+                    s.step != null && s.step < s.steps - 1 && !s.stalled -> Conn.CONNECTING
                     s.awaitingPayment && (wallet?.trafficLevel == Tunnel.Level.EMPTY) -> Conn.PAUSED
                     // The exit holds traffic until it sees the payment on chain (about 2-3 min on a
                     // connection's first payment, when the block becomes final): the tunnel is up, so
@@ -317,6 +319,7 @@ class GnosisEngine(private val tunnel: () -> Tunnel, private val prefs: SharedPr
         val i = s.step ?: return null
         return ((i + 1).toFloat() / s.steps).coerceIn(0f, 1f)
     }
+    override fun connectIssue(): String? = session?.issue
     override fun connectStep(): String = session?.stepName ?: if (tunnel().phase != "running") "Waiting for the network" else "Opening a route to ${ex(loc).country}"
 
     /* ---- throughput, from WireGuard's counters ---- */

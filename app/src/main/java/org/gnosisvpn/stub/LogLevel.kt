@@ -5,9 +5,11 @@ import android.content.Context
 /** How much the on-screen log shows; stored in plain preferences (nothing secret). */
 enum class LogLevel(val coreFilter: String) {
     /** The connection story: core decisions, PIX holds, reconnects; warnings from everything else. */
-    NORMAL("warn,hopr_transport::path=off,gnosisvpn=info,gnosis_vpn_lib::core=info,gnosis_vpn_lib::connection=info,hopr_strategy::pix=info,hopr_lib::builder=info,hopr_transport::protocol::stream=off"),
+    NORMAL("warn,hopr_transport::path=off,gnosisvpn=info,gnosis_vpn_lib::core=info,gnosis_vpn_lib::connection=info,gnosis_vpn_lib::wg_tunnel::tap=info,hopr_strategy::pix=info,hopr_lib::builder=info,hopr_transport::protocol::stream=off"),
     /** Everything at info, minus the path/probe chatter that floods the log. */
     VERBOSE("info,hopr_transport::path=off,hopr_transport_probe=error,hopr_transport_p2p::swarm=warn"),
+    /** Verbose plus the path planner (which relays every forward and return path uses), as the lab's Linux clients log. */
+    PATHS("info,hopr_transport::path=debug,hopr_transport_probe=error,hopr_transport_p2p::swarm=warn"),
     /** Debug for the client and HOPR, info for libraries. */
     DEBUG("debug,hopr_transport::path=off,hopr_transport_probe=info,libp2p=info,libp2p_swarm=info,yamux=info,quinn=info,quinn_proto=info,hickory_proto=info,hickory_resolver=info,h2=info,hyper=info,hyper_util=info,reqwest=info,rustls=info,alloy=info,netlink_proto=info");
 

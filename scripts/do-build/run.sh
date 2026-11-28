@@ -16,8 +16,8 @@ REPO=$(pwd)
 DO_TOKEN_FILE=$(token_file); export DO_TOKEN_FILE   # one token file for create, teardown and the deadline
 SIZE=${SIZE:-c-32}; REGION=${REGION:-ams3}; PROFILE=${PROFILE:-fast}; ABIS=${ABIS:-arm64-v8a x86_64}
 # The payment-stall fixes (relayer side-car, hold until paid) are draft PRs: the commit is on a fork.
-CLIENT_REPO=${CLIENT_REPO:-https://github.com/SCBuergel/gnosis_vpn-client.git}
-CLIENT_REV=${CLIENT_REV:-c768ccf1}; DEADLINE_S=${DEADLINE_S:-21600}
+CLIENT_REPO=${CLIENT_REPO:-https://github.com/gnosis/gnosis_vpn-client.git}
+CLIENT_REV=${CLIENT_REV:-e816fe16}; DEADLINE_S=${DEADLINE_S:-21600}
 TESTS=${TESTS:-1}; case $TESTS in 0|1) ;; *) echo "TESTS must be 0 or 1" >&2; exit 2 ;; esac   # 0 skips the contract tests
 DEADLINE=${DEADLINE:-$HOME/.claude/plugins/cache/sebs-ai-tools/ephemeral-cloud-run/0.1.1/scripts/deadline}
 ST=$HOME/.local/state/gvpndroid-do; mkdir -p "$ST"; chmod 700 "$ST"

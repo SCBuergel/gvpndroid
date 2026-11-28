@@ -1,5 +1,5 @@
 {
- "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0, updated for v1.1.1 (pix_pool, pix_price_per_byte) and for IPC v5 at c768ccf1 (route_health walked_at and percent_of_best instead of walk; no funding_tool) (exit addresses are public).",
+ "_comment": "Contract between the Kotlin app (GnosisProtocol) and the Rust core (WorkerCommand / Response). Checked by app unit tests and by the crate's tests against the real client types. Status samples are real replies from client v1.0.0, updated for v1.1.1 (pix_pool, pix_price_per_byte) and for IPC v5 at c768ccf1 (route_health walked_at and percent_of_best instead of walk; no funding_tool) (exit addresses are public). Updated for IPC v6 at gnosis_vpn-client e816fe16 (status mode and bootstrap_available; connecting step and issue).",
  "commands": {
   "status": "{\"type\":\"status\"}",
   "disconnect": "{\"type\":\"disconnect\"}",
@@ -140,7 +140,11 @@
    "recent": [
     "gvpn-fra-1-xp4e",
     "gvpn-ger-1-j9os"
-   ]
+   ],
+   "mode": {
+    "type": "normal"
+   },
+   "bootstrap_available": false
   }
  },
  "status_preparing_safe": {
@@ -160,7 +164,9 @@
      "fee_to_start": "10000000000000000000",
      "txs_to_start": 3,
      "xdai_fee_per_tx": "50000000000000",
-     "topup_headroom": "0"
+     "topup_headroom": "0",
+     "pix_top_up": "0",
+     "pix_min_available": "0"
     }
    },
    "destinations": [],
@@ -194,7 +200,11 @@
    "recent": [
     "gvpn-fra-1-xp4e",
     "gvpn-ger-1-j9os"
-   ]
+   ],
+   "mode": {
+    "type": "normal"
+   },
+   "bootstrap_available": false
   }
  },
  "expected": {
@@ -259,7 +269,182 @@
    "recent": [
     "gvpn-fra-1-xp4e",
     "gvpn-ger-1-j9os"
-   ]
+   ],
+   "mode": {
+    "type": "normal"
+   },
+   "bootstrap_available": false
+  }
+ },
+ "status_connecting_paying": {
+  "type": "status",
+  "data": {
+   "run_mode": {
+    "type": "running",
+    "hopr_status": {
+     "type": "running"
+    },
+    "funding_status": {
+     "traffic": {
+      "type": "good"
+     },
+     "gas": {
+      "type": "good"
+     },
+     "wxhopr_deficit": null,
+     "xdai_deficit": null,
+     "refill_shortfall": null
+    },
+    "channel_maintenance": {
+     "type": "ok"
+    }
+   },
+   "destinations": [
+    {
+     "destination": {
+      "id": "bonnie-prince-charlie-cp8u",
+      "meta": {
+       "name": "Bonnie Prince Charlie",
+       "description": null,
+       "other": {
+        "flag": "UK",
+        "location": "Edinburgh"
+       }
+      },
+      "geo": {
+       "country": "GB",
+       "source": {
+        "type": "announced_ip"
+       }
+      },
+      "address": "0xE7FD1aBD8DAA1BfA58D96a2620d6e827A64cB2fc",
+      "hops": 1,
+      "gnosis_vpn_server": "172.30.0.1:8000",
+      "wireguard_server": "172.30.0.1:51820",
+      "source": {
+       "type": "discovered"
+      },
+      "overrides": {
+       "configured_meta": {},
+       "configured_gnosis_vpn_server": null,
+       "configured_wireguard_server": null
+      }
+     },
+     "route_health": {
+      "state": {
+       "type": "routable"
+      },
+      "last_error": null,
+      "walked_at": 1794944505491,
+      "percent_of_best": 69,
+      "quick_probe": null
+     }
+    },
+    {
+     "destination": {
+      "id": "gvpn-ger-1-j9os",
+      "meta": {
+       "name": "GVPN-GER-1",
+       "description": null,
+       "other": {}
+      },
+      "geo": {
+       "country": "DE",
+       "source": {
+        "type": "announced_ip"
+       }
+      },
+      "address": "0xe5cE4ae09Ac49e74F3a4d649B93CF0e2CF1DE7bf",
+      "hops": 1,
+      "gnosis_vpn_server": "172.30.0.1:8000",
+      "wireguard_server": "172.30.0.1:51820",
+      "source": {
+       "type": "discovered"
+      },
+      "overrides": {
+       "configured_meta": {},
+       "configured_gnosis_vpn_server": null,
+       "configured_wireguard_server": null
+      }
+     },
+     "route_health": {
+      "state": {
+       "type": "routable"
+      },
+      "last_error": null,
+      "walked_at": 1794944505494,
+      "percent_of_best": 100,
+      "quick_probe": null
+     }
+    }
+   ],
+   "target": null,
+   "connection": {
+    "type": "connecting",
+    "destination": "gvpn-ger-1-j9os",
+    "since": 1795000000000,
+    "phase": {
+     "type": "verify_ping"
+    },
+    "step": {
+     "type": "paying",
+     "payment": {
+      "type": "sent"
+     }
+    },
+    "issue": {
+     "kind": {
+      "type": "payment_route_unavailable"
+     },
+     "attempts": 2
+    },
+    "pix": {
+     "phase": {
+      "type": "funded"
+     },
+     "chunks_committed": 1,
+     "chunks_paid": 1,
+     "chunks_failed": 0,
+     "chunk_bytes": 660160512,
+     "bytes_bought": 660160512,
+     "cost": "5941444608000000000",
+     "bytes_spent": null,
+     "bytes_left": null,
+     "bytes_received": null,
+     "empty_in": null
+    }
+   },
+   "disconnecting": [],
+   "probe": null,
+   "pix_chunk_bytes": 660160512,
+   "pix_price_per_byte": "9000000000",
+   "probing": {
+    "level": {
+     "type": "high"
+    },
+    "reason": {
+     "type": "not_ready",
+     "held_for": 202
+    },
+    "focus": [
+     "gvpn-fra-1-xp4e",
+     "gvpn-ger-1-j9os",
+     "gvpn-rs-1-0ax9",
+     "gvpn-por-1-sfiy",
+     "isambard-kingdom-brunel-r6ag",
+     "gvpn-lt-1-ynm1",
+     "bonnie-prince-charlie-cp8u",
+     "gvpn-kenya-1-tzm3"
+    ]
+   },
+   "recent": [
+    "gvpn-fra-1-xp4e",
+    "gvpn-ger-1-j9os"
+   ],
+   "mode": {
+    "type": "normal"
+   },
+   "bootstrap_available": false
   }
  },
  "bridge_errors": {
@@ -287,5 +472,6 @@
    "dns": null,
    "peer_ips": 2
   }
- }
+ },
+ "_comment_status_connecting_paying": "IPC v6 Connecting while the core holds user traffic for the exit's payment confirmation (built from the client's types; checked by the crate's status_samples_are_responses)."
 }

@@ -1,14 +1,14 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 8a6f1718..d2d5c264 100644
+index d6b528b4..255917db 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -4431,6 +4431,23 @@ dependencies = [
+@@ -4433,6 +4433,23 @@ dependencies = [
   "wasm-bindgen",
  ]
  
 +[[package]]
 +name = "gnosis_vpn-android"
-+version = "1.1.1"
++version = "1.2.1"
 +dependencies = [
 + "gnosis_vpn-ipc",
 + "gnosis_vpn-lib",
@@ -25,26 +25,34 @@ index 8a6f1718..d2d5c264 100644
 +
  [[package]]
  name = "gnosis_vpn-ctl"
- version = "1.1.1"
-@@ -5222,7 +5239,7 @@ dependencies = [
- [[package]]
- name = "hopr-strategy"
- version = "9.2.1"
--source = "git+https://github.com/hoprnet/hopr-strategy?rev=97bfc19a74235c814b322d355c2429100fac7174#97bfc19a74235c814b322d355c2429100fac7174"
-+source = "git+https://github.com/SCBuergel/hopr-strategy?rev=d6ad33ff62dcbf83155864a4e882e0784aca2d73#d6ad33ff62dcbf83155864a4e882e0784aca2d73"
+ version = "1.2.1"
+@@ -8427,7 +8444,7 @@ dependencies = [
+  "quinn-udp 0.5.16",
+  "rustc-hash",
+  "rustls",
+- "socket2 0.6.5",
++ "socket2 0.5.10",
+  "thiserror 2.0.21",
+  "tokio",
+  "tracing",
+@@ -8467,7 +8484,7 @@ dependencies = [
+  "cfg_aliases",
+  "libc",
+  "once_cell",
+- "socket2 0.6.5",
++ "socket2 0.5.10",
+  "tracing",
+  "windows-sys 0.61.2",
+ ]
+@@ -8480,7 +8497,7 @@ checksum = "47091c86514c2e11452cb228dee77037334b99d92a23e4c69aa5982261f39247"
  dependencies = [
-  "anyhow",
-  "async-trait",
-diff --git a/Cargo.toml b/Cargo.toml
-index d9ce7227..866b7786 100644
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ -96,4 +96,4 @@ strip         = true
+  "cfg_aliases",
+  "libc",
+- "socket2 0.6.5",
++ "socket2 0.5.10",
+  "windows-sys 0.61.2",
+ ]
  
- # CORE-1411 refill retry until hopr-strategy 9.2.1 is published
- [patch.crates-io]
--hopr-strategy = { git = "https://github.com/hoprnet/hopr-strategy", rev = "97bfc19a74235c814b322d355c2429100fac7174" }
-+hopr-strategy = { git = "https://github.com/SCBuergel/hopr-strategy", rev = "d6ad33ff62dcbf83155864a4e882e0784aca2d73" }
 diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
 index 07469a31..84217fe6 100644
 --- a/gnosis_vpn-ipc/src/dirs.rs
@@ -59,7 +67,7 @@ index 07469a31..84217fe6 100644
      UserDirs {
          data: home.join(".local/share/gnosisvpn"),
 diff --git a/gnosis_vpn-ipc/src/socket.rs b/gnosis_vpn-ipc/src/socket.rs
-index ab6958f3..357a9bcc 100644
+index 8529e073..b1861104 100644
 --- a/gnosis_vpn-ipc/src/socket.rs
 +++ b/gnosis_vpn-ipc/src/socket.rs
 @@ -7,7 +7,7 @@ use std::time::Duration;
@@ -94,43 +102,47 @@ index a8f5221e..7b0b1085 100644
  
  #[cfg(test)]
 diff --git a/gnosis_vpn-lib/src/connection/up/runner.rs b/gnosis_vpn-lib/src/connection/up/runner.rs
-index 701e02e7..79436779 100644
+index 7275c743..27e2c466 100644
 --- a/gnosis_vpn-lib/src/connection/up/runner.rs
 +++ b/gnosis_vpn-lib/src/connection/up/runner.rs
-@@ -133,7 +133,15 @@ impl Runner {
-         // 5b. give the payment relayer its own unpaid session through this exit. The deposit for the
-         //     session opened next must not depend on that session: the exit holds its traffic back once
-         //     the free allowance is used up, and the relayer's answers would be held back with it.
--        let paid_through_sidecar = open_relayer_sidecar(&self.hopr, &self.destination, &self.options).await;
-+        //     Android: the app is excluded from its own VPN, so the relayer is reached directly and never
-+        //     through the tunnel. The side-car only where the app asks for it (android_sidecar), because
-+        //     most exits do not allow it as a target; the hold below runs either way and keeps the
-+        //     user's traffic off the exit's free allowance until the first payment is seen.
-+        let paid_through_sidecar = if cfg!(target_os = "android") && !android_sidecar(&self.destination) {
-+            true
-+        } else {
-+            open_relayer_sidecar(&self.hopr, &self.destination, &self.options).await
-+        };
- 
-         // 6. open the wg session (also carries the in-tunnel verification ping). The
-         //    raw session is spliced directly into the pump - no local listener and no
-@@ -729,3 +737,11 @@ mod tests {
-         );
-     }
- }
-+
-+/// Android: whether to pay through the relayer side-car for [dest]. Yes when the app set
-+/// `GNOSISVPN_ANDROID_SIDECAR=all` (developer screen), or when the configuration pinned the exit
-+/// with the label `sidecar = "on"` (the lab exits, which allow the relayer as a session target).
-+fn android_sidecar(dest: &Destination) -> bool {
-+    std::env::var("GNOSISVPN_ANDROID_SIDECAR").is_ok_and(|v| v == "all")
-+        || dest.meta.other.get("sidecar").is_some_and(|v| v == "on")
-+}
+@@ -188,6 +188,10 @@ impl Runner {
+         let allowed_ips = parse_allowed_ips(self.wg_config.allowed_ips.as_deref());
+         let interface = request_setup_tunnel(&registration, &self.wg_config, peer_ips.clone(), &results_sender).await?;
+         let (engine, tun_reader, tun_writer) = prepare_pump(&wg, &registration, allowed_ips).await?;
++        // Android: the app can neither ping through its own VPN nor firewall it, so the pings and the
++        // killswitch stages below act on the pump itself (wg_tunnel::tap).
++        #[cfg(target_os = "android")]
++        let (tun_reader, tun_writer) = wg_tunnel::tap::tap(tun_reader, tun_writer, registration.ip());
+         let pump_exited = CancellationToken::new();
+         self.spawn_pump_task(
+             engine,
+@@ -500,17 +504,19 @@ impl Runner {
+     /// to tear down routing. A pump that exits on its own (WG session expiry, an
+     /// endpoint closing, or a pump error) reports through the results channel so
+     /// core reconnects immediately instead of waiting for a ping failure.
+-    fn spawn_pump_task<NS, NR>(
++    fn spawn_pump_task<NS, NR, TS, TR>(
+         &self,
+         engine: wg_tunnel::WgTunnel,
+         mut net_tx: NS,
+         net_rx: NR,
+-        tun: (wg_tunnel::TunWriter, wg_tunnel::TunReader),
++        tun: (TS, TR),
+         results_sender: &mpsc::Sender<Results>,
+         pump_exited: CancellationToken,
+     ) where
+         NS: wg_tunnel::NetworkSender + 'static,
+         NR: wg_tunnel::NetworkReceiver + 'static,
++        TS: wg_tunnel::TunSender + 'static,
++        TR: wg_tunnel::TunReceiver + 'static,
+     {
+         let (tun_writer, tun_reader) = tun;
+         let cancel = self.cancel.clone();
 diff --git a/gnosis_vpn-lib/src/core/mod.rs b/gnosis_vpn-lib/src/core/mod.rs
-index cdc78929..4a5393d2 100644
+index a12a6e53..db083d64 100644
 --- a/gnosis_vpn-lib/src/core/mod.rs
 +++ b/gnosis_vpn-lib/src/core/mod.rs
-@@ -358,6 +358,11 @@ impl Core {
+@@ -378,6 +378,11 @@ impl Core {
                  _ = probing_tick.tick() => self.sync_network_probing(),
              }
          }
@@ -169,7 +181,7 @@ index 4238698a..96b33559 100644
  #[cfg(target_os = "macos")]
  pub const DEFAULT_DB_PATH: &str = "/usr/local/share/gnosisvpn/geoip.mmdb";
 diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
-index f06b42ff..e9d8505a 100644
+index 0428601a..7db79995 100644
 --- a/gnosis_vpn-lib/src/hopr/pix_config.rs
 +++ b/gnosis_vpn-lib/src/hopr/pix_config.rs
 @@ -7,7 +7,7 @@ use serde_with::{DisplayFromStr, serde_as};
@@ -183,14 +195,17 @@ index f06b42ff..e9d8505a 100644
  pub const DEFAULT_CURVY_ZK_DIR: &str = "/usr/local/share/gnosisvpn/curvy-zk";
 diff --git a/gnosis_vpn-lib/src/killswitch/android.rs b/gnosis_vpn-lib/src/killswitch/android.rs
 new file mode 100644
-index 00000000..1c830ca9
+index 00000000..c1b5a83e
 --- /dev/null
 +++ b/gnosis_vpn-lib/src/killswitch/android.rs
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,53 @@
 +//! Android has no app-controlled firewall. The kill switch is the system setting
-+//! "Always-on VPN" + "Block connections without VPN", so every policy call is a no-op.
++//! "Always-on VPN" + "Block connections without VPN", so every policy call is a no-op; the
++//! tunnel stages (TunnelAccess) are applied in the pump instead (wg_tunnel::tap).
 +
 +use std::net::IpAddr;
++
++use super::TunnelAccess;
 +
 +use thiserror::Error;
 +
@@ -211,11 +226,21 @@ index 00000000..1c830ca9
 +        Ok(None)
 +    }
 +
-+    pub fn apply_policy(&mut self, _interface: Option<&str>, _allowed_ips: &[IpAddr], _lan_lockdown: bool) -> Result<(), Error> {
++    pub fn apply_policy(
++        &mut self,
++        _tunnel: &TunnelAccess,
++        _allowed_ips: &[IpAddr],
++        _lan_lockdown: bool,
++    ) -> Result<(), Error> {
 +        Ok(())
 +    }
 +
-+    pub fn reapply_policy(&mut self, _interface: Option<&str>, _allowed_ips: &[IpAddr], _lan_lockdown: bool) -> Result<(), Error> {
++    pub fn reapply_policy(
++        &mut self,
++        _tunnel: &TunnelAccess,
++        _allowed_ips: &[IpAddr],
++        _lan_lockdown: bool,
++    ) -> Result<(), Error> {
 +        Ok(())
 +    }
 +
@@ -228,10 +253,10 @@ index 00000000..1c830ca9
 +    }
 +}
 diff --git a/gnosis_vpn-lib/src/killswitch/mod.rs b/gnosis_vpn-lib/src/killswitch/mod.rs
-index 9cf29b2b..f6ec71d1 100644
+index fa3dded9..efd6876f 100644
 --- a/gnosis_vpn-lib/src/killswitch/mod.rs
 +++ b/gnosis_vpn-lib/src/killswitch/mod.rs
-@@ -34,5 +34,8 @@ cfg_if::cfg_if! {
+@@ -51,5 +51,8 @@ cfg_if::cfg_if! {
      } else if #[cfg(target_os = "macos")] {
          mod macos;
          pub use macos::{Error, Firewall};
@@ -284,6 +309,413 @@ index 07e900c0..750b382c 100644
  fn ensure_cloexec(_fd: &OwnedFd) -> io::Result<()> {
      Ok(()) // already atomic via MSG_CMSG_CLOEXEC
  }
+diff --git a/gnosis_vpn-lib/src/wg_tunnel/mod.rs b/gnosis_vpn-lib/src/wg_tunnel/mod.rs
+index ca1e99b0..4576c924 100644
+--- a/gnosis_vpn-lib/src/wg_tunnel/mod.rs
++++ b/gnosis_vpn-lib/src/wg_tunnel/mod.rs
+@@ -17,6 +17,8 @@ mod pump;
+ mod session;
+ mod stats;
+ #[cfg(unix)]
++pub mod tap;
++#[cfg(unix)]
+ mod tun;
+ mod tunnel;
+ 
+diff --git a/gnosis_vpn-lib/src/wg_tunnel/tap.rs b/gnosis_vpn-lib/src/wg_tunnel/tap.rs
+new file mode 100644
+index 00000000..c7bf4e84
+--- /dev/null
++++ b/gnosis_vpn-lib/src/wg_tunnel/tap.rs
+@@ -0,0 +1,388 @@
++//! In-process access to the tunnel, for a platform where the core can neither ping through the TUN
++//! device nor firewall it: on Android the app is excluded from its own VPN (so a ping from it would
++//! bypass the tunnel), and an app has no packet filter.
++//!
++//! [`tap`] wraps the pump's TUN reader and writer:
++//! - [`ping`] injects ICMP echo requests into the pump as if the system had sent them, and takes the
++//!   matching replies out before they reach the system. Root's in-tunnel ping on desktop does the
++//!   same job: it verifies that the exit serves the session (under strict prepay, that it saw the
++//!   deposit) and keeps checking the connection afterwards.
++//! - [`set_access`] mirrors the killswitch's [`TunnelAccess`] stages: while `GatewayOnly`, packets
++//!   from the system to anyone but the gateway are dropped, so user traffic waits for the payment
++//!   as it does behind the desktop killswitch. Injected pings always pass.
++
++use std::collections::HashMap;
++use std::io;
++use std::net::{IpAddr, Ipv4Addr};
++use std::sync::atomic::{AtomicU16, Ordering};
++use std::sync::{Arc, Mutex};
++use std::time::{Duration, Instant};
++
++use tokio::sync::mpsc;
++
++use super::{TunReceiver, TunSender};
++use crate::killswitch::TunnelAccess;
++
++/// ICMP identifier of the tap's echo requests ("GV"); replies are matched on it and on the sequence.
++const IDENT: u16 = 0x4756;
++/// Spacing of the echoes of one [`ping`] call, as `ping -c N` sends them.
++const ECHO_INTERVAL: Duration = Duration::from_secs(1);
++/// Injected packets waiting for the pump; a full queue fails the ping instead of blocking it.
++const INJECT_QUEUE: usize = 16;
++
++/// What the system may send through the tunnel.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++enum Access {
++    Closed,
++    GatewayOnly(IpAddr),
++    Open,
++}
++
++/// Open until a killswitch stage says otherwise: a tunnel no stage was set for behaves as before.
++static ACCESS: Mutex<Access> = Mutex::new(Access::Open);
++/// The tap of the running pump, if any.
++static CURRENT: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
++static NEXT_SEQ: AtomicU16 = AtomicU16::new(1);
++
++struct Shared {
++    source: Ipv4Addr,
++    inject: mpsc::Sender<Vec<u8>>,
++    /// Sequence number -> (address pinged, where to report the reply's arrival).
++    waiters: Mutex<HashMap<u16, (Ipv4Addr, mpsc::Sender<(u16, Instant)>)>>,
++}
++
++/// Applies a killswitch stage to the tunnel.
++pub fn set_access(tunnel: &TunnelAccess) {
++    let access = match tunnel {
++        TunnelAccess::Closed => Access::Closed,
++        TunnelAccess::GatewayOnly { gateway, .. } => Access::GatewayOnly(*gateway),
++        TunnelAccess::Open { .. } => Access::Open,
++    };
++    tracing::info!(?access, "tunnel access");
++    *ACCESS.lock().expect("tap access lock poisoned") = access;
++}
++
++/// Wraps the pump's TUN endpoints; `source` is the tunnel address the exit assigned this client.
++/// Replaces the tap of an earlier pump, whose pending pings then fail.
++pub fn tap<R: TunReceiver, W: TunSender>(reader: R, writer: W, source: Ipv4Addr) -> (TapReader<R>, TapWriter<W>) {
++    let (inject, injected) = mpsc::channel(INJECT_QUEUE);
++    let shared = Arc::new(Shared {
++        source,
++        inject,
++        waiters: Mutex::new(HashMap::new()),
++    });
++    *CURRENT.lock().expect("tap lock poisoned") = Some(shared.clone());
++    (
++        TapReader {
++            inner: reader,
++            injected,
++            shared: shared.clone(),
++        },
++        TapWriter { inner: writer, shared },
++    )
++}
++
++/// Pings `address` through the tunnel like `ping -c count -W timeout`: up to `count` echoes, one
++/// a second, and the round trip of the first reply. Fails when no reply came within `timeout` of
++/// the last echo, or when no tunnel is up.
++pub async fn ping(address: IpAddr, timeout: Duration, count: u16) -> Result<Duration, String> {
++    let IpAddr::V4(dst) = address else {
++        return Err(format!("in-tunnel ping supports IPv4 only, not {address}"));
++    };
++    let shared = CURRENT
++        .lock()
++        .expect("tap lock poisoned")
++        .clone()
++        .ok_or_else(|| "no tunnel is up".to_string())?;
++    let count = count.max(1);
++    let (replies, mut arrived) = mpsc::channel(usize::from(count));
++    let mut sent: HashMap<u16, Instant> = HashMap::new();
++    let result = async {
++        for i in 0..count {
++            let seq = NEXT_SEQ.fetch_add(1, Ordering::Relaxed);
++            shared
++                .waiters
++                .lock()
++                .expect("tap waiters lock poisoned")
++                .insert(seq, (dst, replies.clone()));
++            sent.insert(seq, Instant::now());
++            shared
++                .inject
++                .try_send(echo_request(shared.source, dst, IDENT, seq))
++                .map_err(|e| format!("tunnel did not take the ping: {e}"))?;
++            let wait = if i + 1 == count { timeout } else { ECHO_INTERVAL };
++            if let Ok(Some((seq, at))) = tokio::time::timeout(wait, arrived.recv()).await {
++                return Ok(at.saturating_duration_since(sent[&seq]));
++            }
++        }
++        Err(format!("no reply from {dst} through the tunnel"))
++    }
++    .await;
++    let mut waiters = shared.waiters.lock().expect("tap waiters lock poisoned");
++    for seq in sent.keys() {
++        waiters.remove(seq);
++    }
++    result
++}
++
++/// The pump's TUN reader: injected pings first, then the system's packets the access allows.
++pub struct TapReader<R> {
++    inner: R,
++    injected: mpsc::Receiver<Vec<u8>>,
++    shared: Arc<Shared>,
++}
++
++#[async_trait::async_trait]
++impl<R: TunReceiver> TunReceiver for TapReader<R> {
++    async fn recv(&mut self, out: &mut [u8]) -> io::Result<Option<usize>> {
++        loop {
++            // Both branches are cancel-safe: the inner reader by contract, the channel by tokio's.
++            tokio::select! {
++                biased;
++                Some(packet) = self.injected.recv() => {
++                    if packet.len() > out.len() {
++                        continue;
++                    }
++                    out[..packet.len()].copy_from_slice(&packet);
++                    return Ok(Some(packet.len()));
++                }
++                read = self.inner.recv(out) => match read {
++                    Ok(Some(n)) if !allowed(*ACCESS.lock().expect("tap access lock poisoned"), &out[..n]) => continue,
++                    other => return other,
++                },
++            }
++        }
++    }
++}
++
++impl<R> Drop for TapReader<R> {
++    fn drop(&mut self) {
++        let mut current = CURRENT.lock().expect("tap lock poisoned");
++        if current.as_ref().is_some_and(|c| Arc::ptr_eq(c, &self.shared)) {
++            *current = None;
++        }
++    }
++}
++
++/// The pump's TUN writer: replies to the tap's pings are taken out, everything else goes on.
++pub struct TapWriter<W> {
++    inner: W,
++    shared: Arc<Shared>,
++}
++
++#[async_trait::async_trait]
++impl<W: TunSender> TunSender for TapWriter<W> {
++    async fn send(&mut self, packet: &[u8]) -> io::Result<()> {
++        if let Some((src, seq)) = echo_reply(packet, IDENT) {
++            let waiter = self
++                .shared
++                .waiters
++                .lock()
++                .expect("tap waiters lock poisoned")
++                .remove(&seq);
++            match waiter {
++                Some((pinged, replies)) if pinged == src => {
++                    let _ = replies.try_send((seq, Instant::now()));
++                }
++                // A reply for one of our pings that is no longer awaited (late) is dropped too.
++                _ => {}
++            }
++            return Ok(());
++        }
++        self.inner.send(packet).await
++    }
++}
++
++/// Whether a packet the system sent may enter the tunnel under `access`.
++fn allowed(access: Access, packet: &[u8]) -> bool {
++    match access {
++        Access::Open => true,
++        Access::Closed => false,
++        Access::GatewayOnly(IpAddr::V4(gateway)) => {
++            packet.len() >= 20 && packet[0] >> 4 == 4 && packet[16..20] == gateway.octets()
++        }
++        Access::GatewayOnly(IpAddr::V6(gateway)) => {
++            packet.len() >= 40 && packet[0] >> 4 == 6 && packet[24..40] == gateway.octets()
++        }
++    }
++}
++
++fn checksum(data: &[u8]) -> u16 {
++    let mut sum: u32 = data
++        .chunks(2)
++        .map(|c| u32::from(u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)])))
++        .sum();
++    while sum >> 16 != 0 {
++        sum = (sum & 0xffff) + (sum >> 16);
++    }
++    !(sum as u16)
++}
++
++/// An IPv4 ICMP echo request with a 16-byte zero payload.
++fn echo_request(src: Ipv4Addr, dst: Ipv4Addr, ident: u16, seq: u16) -> Vec<u8> {
++    let mut icmp = vec![8, 0, 0, 0];
++    icmp.extend_from_slice(&ident.to_be_bytes());
++    icmp.extend_from_slice(&seq.to_be_bytes());
++    icmp.extend_from_slice(&[0u8; 16]);
++    let c = checksum(&icmp);
++    icmp[2..4].copy_from_slice(&c.to_be_bytes());
++
++    let total = (20 + icmp.len()) as u16;
++    let mut ip = vec![0x45, 0];
++    ip.extend_from_slice(&total.to_be_bytes());
++    ip.extend_from_slice(&seq.to_be_bytes()); // identification
++    ip.extend_from_slice(&[0x40, 0]); // don't fragment
++    ip.extend_from_slice(&[64, 1, 0, 0]); // ttl, ICMP, checksum below
++    ip.extend_from_slice(&src.octets());
++    ip.extend_from_slice(&dst.octets());
++    let c = checksum(&ip);
++    ip[10..12].copy_from_slice(&c.to_be_bytes());
++    ip.extend_from_slice(&icmp);
++    ip
++}
++
++/// The source and sequence of an IPv4 ICMP echo reply carrying `ident`, else None.
++fn echo_reply(packet: &[u8], ident: u16) -> Option<(Ipv4Addr, u16)> {
++    if packet.len() < 20 || packet[0] >> 4 != 4 || packet[9] != 1 {
++        return None;
++    }
++    let ihl = usize::from(packet[0] & 0x0f) * 4;
++    let icmp = packet.get(ihl..ihl + 8)?;
++    if icmp[0] != 0 || u16::from_be_bytes([icmp[4], icmp[5]]) != ident {
++        return None;
++    }
++    let src = Ipv4Addr::new(packet[12], packet[13], packet[14], packet[15]);
++    Some((src, u16::from_be_bytes([icmp[6], icmp[7]])))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const CLIENT: Ipv4Addr = Ipv4Addr::new(10, 128, 0, 7);
++    const GATEWAY: Ipv4Addr = Ipv4Addr::new(10, 128, 0, 1);
++
++    struct FakeReader(mpsc::Receiver<Vec<u8>>);
++    struct FakeWriter(mpsc::Sender<Vec<u8>>);
++
++    #[async_trait::async_trait]
++    impl TunReceiver for FakeReader {
++        async fn recv(&mut self, out: &mut [u8]) -> io::Result<Option<usize>> {
++            Ok(self.0.recv().await.map(|p| {
++                out[..p.len()].copy_from_slice(&p);
++                p.len()
++            }))
++        }
++    }
++
++    #[async_trait::async_trait]
++    impl TunSender for FakeWriter {
++        async fn send(&mut self, packet: &[u8]) -> io::Result<()> {
++            let _ = self.0.send(packet.to_vec()).await;
++            Ok(())
++        }
++    }
++
++    fn fake() -> (FakeReader, FakeWriter, mpsc::Sender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) {
++        let (system_tx, system_rx) = mpsc::channel(8);
++        let (out_tx, out_rx) = mpsc::channel(8);
++        (FakeReader(system_rx), FakeWriter(out_tx), system_tx, out_rx)
++    }
++
++    /// The reply the gateway sends to an echo request.
++    fn reply_to(request: &[u8]) -> Vec<u8> {
++        let mut reply = request.to_vec();
++        reply[12..16].copy_from_slice(&request[16..20]);
++        reply[16..20].copy_from_slice(&request[12..16]);
++        reply[20] = 0;
++        reply
++    }
++
++    fn udp_to(dst: Ipv4Addr) -> Vec<u8> {
++        let mut p = echo_request(CLIENT, dst, 1, 1);
++        p[9] = 17;
++        p
++    }
++
++    #[test]
++    fn echo_request_has_valid_checksums_and_its_reply_is_recognised() {
++        let request = echo_request(CLIENT, GATEWAY, IDENT, 42);
++        assert_eq!(checksum(&request[..20]), 0, "IPv4 header checksum");
++        assert_eq!(checksum(&request[20..]), 0, "ICMP checksum");
++        assert_eq!(echo_reply(&request, IDENT), None, "a request is not a reply");
++        assert_eq!(echo_reply(&reply_to(&request), IDENT), Some((GATEWAY, 42)));
++        assert_eq!(echo_reply(&reply_to(&request), IDENT + 1), None, "another identifier");
++    }
++
++    #[test]
++    fn access_stages_gate_the_systems_packets() {
++        let to_gateway = udp_to(GATEWAY);
++        let to_web = udp_to(Ipv4Addr::new(1, 1, 1, 1));
++        assert!(allowed(Access::Open, &to_web));
++        assert!(!allowed(Access::Closed, &to_gateway));
++        assert!(allowed(Access::GatewayOnly(IpAddr::V4(GATEWAY)), &to_gateway));
++        assert!(!allowed(Access::GatewayOnly(IpAddr::V4(GATEWAY)), &to_web));
++        assert!(
++            !allowed(Access::GatewayOnly(IpAddr::V4(GATEWAY)), &[0x60; 40]),
++            "IPv6 to an IPv4 gateway"
++        );
++    }
++
++    /// One test drives the process-wide tap state end to end, so no two tests race on it.
++    #[tokio::test]
++    async fn pings_go_through_the_pump_and_replies_never_reach_the_system() {
++        assert!(
++            ping(IpAddr::V4(GATEWAY), Duration::from_millis(50), 1).await.is_err(),
++            "no tunnel yet"
++        );
++
++        let (reader, writer, system, mut delivered) = fake();
++        let (mut tap_reader, mut tap_writer) = tap(reader, writer, CLIENT);
++        let (into_pump, mut pump_saw) = mpsc::channel::<Vec<u8>>(8);
++        // The "pump": answers echo requests to the gateway, forwards everything else to the system.
++        let pump = tokio::spawn(async move {
++            let mut buf = vec![0u8; 2048];
++            while let Ok(Some(n)) = tap_reader.recv(&mut buf).await {
++                let packet = buf[..n].to_vec();
++                let _ = into_pump.send(packet.clone()).await;
++                if packet[9] == 1 && packet[20] == 8 && packet[16..20] == GATEWAY.octets() {
++                    tap_writer.send(&reply_to(&packet)).await.unwrap();
++                }
++            }
++        });
++
++        let rtt = ping(IpAddr::V4(GATEWAY), Duration::from_secs(2), 3)
++            .await
++            .expect("the gateway answers");
++        assert!(rtt < Duration::from_secs(1));
++        let request = pump_saw.recv().await.unwrap();
++        assert_eq!(echo_reply(&reply_to(&request), IDENT).map(|(s, _)| s), Some(GATEWAY));
++        assert!(
++            delivered.try_recv().is_err(),
++            "the reply was taken out before the system"
++        );
++
++        // Gateway-only: the system's packet to the web is dropped, its packet to the gateway passes.
++        set_access(&TunnelAccess::GatewayOnly {
++            interface: "tun0".into(),
++            gateway: IpAddr::V4(GATEWAY),
++        });
++        system.send(udp_to(Ipv4Addr::new(1, 1, 1, 1))).await.unwrap();
++        system.send(udp_to(GATEWAY)).await.unwrap();
++        let passed = pump_saw.recv().await.unwrap();
++        assert_eq!(passed[16..20], GATEWAY.octets());
++        // Pings still pass while user traffic waits.
++        assert!(ping(IpAddr::V4(GATEWAY), Duration::from_secs(2), 1).await.is_ok());
++        set_access(&TunnelAccess::Open {
++            interface: "tun0".into(),
++        });
++
++        // A pump that ends takes its tap with it: later pings fail at once.
++        drop(system);
++        pump.await.unwrap();
++        assert_eq!(
++            ping(IpAddr::V4(GATEWAY), Duration::from_secs(5), 1).await,
++            Err("no tunnel is up".to_string())
++        );
++    }
++}
 diff --git a/gnosis_vpn-lib/src/wg_tunnel/tun.rs b/gnosis_vpn-lib/src/wg_tunnel/tun.rs
 index 08a137d2..255b4ab6 100644
 --- a/gnosis_vpn-lib/src/wg_tunnel/tun.rs
