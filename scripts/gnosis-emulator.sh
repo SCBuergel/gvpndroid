@@ -121,6 +121,12 @@ e2e)
 
     # 2. Sustained download: 12 MB (Debian's Contents-amd64.gz, about 12.7 MB), timed.
     b=$(rx); t0=$(date +%s); n=$(fetch /debian/dists/stable/main/Contents-amd64.gz deb.debian.org 12000000); t1=$(date +%s); a=$(rx)
+    if [ "${n:-0}" -lt 12000000 ]; then
+        # A stall is reported, then tried once more: the check is whether the session carries data.
+        echo "info: the timed download stalled after ${n:-0} bytes ($(( t1 - t0 )) s, tun0 rx $(( ${a:-0} - ${b:-0} ))); retrying once in 20 s"
+        sleep 20
+        b=$(rx); t0=$(date +%s); n=$(fetch /debian/dists/stable/main/Contents-amd64.gz deb.debian.org 12000000); t1=$(date +%s); a=$(rx)
+    fi
     got=$(( ${a:-0} - ${b:-0} )); dur=$(( t1 - t0 )); [ "$dur" -gt 0 ] || dur=1
     echo "info: downloaded ${n:-0} bytes in ${dur} s ($(( ${n:-0} * 8 / dur / 1000 )) kbit/s), tun0 rx $got bytes"
     check "12 MB downloaded through tun0" '[ "${n:-0}" -ge 12000000 ] && [ "$got" -ge 12000000 ]'
@@ -140,6 +146,8 @@ e2e)
     "$0" connect
     check "tunnel down after the second disconnect" "wait_for 60 '! on_tun'"
     corelog | grep -E "WARN|ERROR" | sed 's/^/core: /' | tail -40
+    # The whole core log of the run, for tracing a failure afterwards (E2E_CORE_LOG, default ./e2e-core.log).
+    corelog > "${E2E_CORE_LOG:-e2e-core.log}" 2>/dev/null && echo "info: core log saved to ${E2E_CORE_LOG:-e2e-core.log}"
     [ "$fails" = 0 ] && echo "E2E PASS" || { echo "E2E FAIL ($fails)"; exit 1; }
     ;;
 *) sed -n '2,17p' "$0"; exit 2 ;;

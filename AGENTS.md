@@ -208,12 +208,12 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
     `relayer_via`). Deposits are held until it is open. An exit that refuses the relayer as a
     target fails the attempt (issue `payment_route_unavailable`). Off on Android (the patch).
   - **The payment hold (#1090):** after the pump is up only the gateway gets through; the core
-    pings it until the exit answers, which under strict prepay means it has seen the deposit. An
-    exit without strict prepay answers at once on its free allowance and holds traffic a little
-    later, when it asks for the payment
-    (phase `awaiting_payment`/`verify_ping`, step `paying`). Then user traffic is let through.
-    On Android both run through the tap above, so the app shows the core's `step` and `issue`
-    and counts the session as connected only from `adjust_to_main` on.
+    pings it until the exit answers (phase `awaiting_payment`/`verify_ping`, step `paying`), which
+    under strict prepay means it has seen the deposit. Then user traffic is let through. An exit
+    without strict prepay answers at once on its free allowance and asks for the payment a few
+    seconds later. On Android the ping and the gateway-only stage run through the tap above, so
+    the app shows the core's `step` and `issue` and counts the session as connected only from
+    `adjust_to_main` on.
   - **The probe session's SURB balancing and ACK retransmission (#1085).** Don't add
     retransmission to `[connection.bridge] capabilities` in the config: in the lab it starved the
     exit's probe sessions of SURBs and stalled all of the exit's egress for 1 s at a time.
