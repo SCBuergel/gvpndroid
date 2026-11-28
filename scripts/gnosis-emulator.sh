@@ -11,6 +11,8 @@
 #   scripts/gnosis-emulator.sh e2e                 end-to-end test, PASS/FAIL per step: core running,
 #       connect (timed) with the payment hold before traffic, public IP differs from this machine's,
 #       a timed 12 MB download through tun0, disconnect, a second connect with 1 MB, disconnect.
+#       A timed download that stalls is reported and retried once. The run's core log is saved to
+#       E2E_CORE_LOG (default ~/.cache/gvpndroid-e2e/core-<time>.log, outside the repository).
 #       Needs a funded node (setup done before). Manual only: every run pays the exit (PIX) twice.
 # Config files hold no keys, but stay outside the repo: they are per-device settings.
 set -eu
@@ -146,8 +148,10 @@ e2e)
     "$0" connect
     check "tunnel down after the second disconnect" "wait_for 60 '! on_tun'"
     corelog | grep -E "WARN|ERROR" | sed 's/^/core: /' | tail -40
-    # The whole core log of the run, for tracing a failure afterwards (E2E_CORE_LOG, default ./e2e-core.log).
-    corelog > "${E2E_CORE_LOG:-e2e-core.log}" 2>/dev/null && echo "info: core log saved to ${E2E_CORE_LOG:-e2e-core.log}"
+    # The whole core log of the run, for tracing a failure afterwards. Outside the repository by
+    # default: it is full of node and peer addresses.
+    core_log=${E2E_CORE_LOG:-$HOME/.cache/gvpndroid-e2e/core-$(date +%Y%m%d-%H%M%S).log}
+    mkdir -p "$(dirname "$core_log")" && corelog > "$core_log" 2>/dev/null && echo "info: core log saved to $core_log"
     [ "$fails" = 0 ] && echo "E2E PASS" || { echo "E2E FAIL ($fails)"; exit 1; }
     ;;
 *) sed -n '2,17p' "$0"; exit 2 ;;
