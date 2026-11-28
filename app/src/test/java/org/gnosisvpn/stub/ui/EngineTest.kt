@@ -209,6 +209,24 @@ class GnosisEngineTest {
         assertEquals("e5ce", e.exitTag(e.ex(e.loc)))
     }
 
+    /** IPC v6: the tun is up (tn.state CONNECTED) while the core still holds traffic for the payment. */
+    @Test fun aTunHeldForThePaymentIsStillConnecting() {
+        val (tn, e, _) = setup()
+        tn.phase = "running"; tn.locations = listOf(ger(), uk()); tn.wallet = wallet("54")
+        e.tick()
+        e.act("connect")
+        tn.state = T.State.CONNECTED
+        tn.session = T.Session("0xe5cE", 1, step = 3, steps = 6, stepName = "Payment sent, waiting for the exit to see it",
+            issue = "The tunnel doesn’t answer yet. Retrying.", payment = T.Payment.FUNDED)
+        e.tick()
+        assertEquals(Conn.CONNECTING, e.conn)
+        assertEquals("Payment sent, waiting for the exit to see it", e.connectStep())
+        assertEquals("The tunnel doesn’t answer yet. Retrying.", e.connectIssue())
+        tn.session = tn.session!!.copy(step = 5, stepName = "Connected", issue = null)
+        e.tick()
+        assertEquals(Conn.CONNECTED, e.conn); assertNull(e.connectIssue())
+    }
+
     @Test fun connectedSessionShowsRealData() {
         val (tn, e, h) = setup()
         tn.phase = "running"; tn.locations = listOf(ger(), uk()); tn.wallet = wallet("54")   // 6 GB at the configured price

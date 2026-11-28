@@ -29,12 +29,15 @@ if [ "$PROFILE" = fast ]; then
     # Release without LTO: minutes from scratch instead of a fat-LTO link per ABI.
     export CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_STRIP=true
 fi
-# The crate's contract tests (tests/protocol.json against the client's real types) on the host
-# target; a failure stops the build. TESTS=0 skips them.
+# The crate's contract tests (tests/protocol.json against the client's real types) and the patch's
+# tap tests on the host target; a failure stops the build. TESTS=0 skips them.
 if [ "${TESTS:-1}" = 1 ]; then
     s=$(date +%s)
     cargo test --locked -p gnosis_vpn-android 2>&1 | grep -E '^(error|test |test result)|panicked' || true
     cargo test --locked -q -p gnosis_vpn-android >/dev/null 2>&1 || { echo "STEP test FAILED"; exit 1; }
+    # The patch's in-pump tap (in-tunnel ping, tunnel stages) is tested in gnosis_vpn-lib.
+    cargo test --locked -p gnosis_vpn-lib --lib wg_tunnel::tap 2>&1 | grep -E '^(error|test |test result)|panicked' || true
+    cargo test --locked -q -p gnosis_vpn-lib --lib wg_tunnel::tap >/dev/null 2>&1 || { echo "STEP test FAILED (tap)"; exit 1; }
     echo "STEP test $(( $(date +%s) - s ))"
 fi
 s=$(date +%s)

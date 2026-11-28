@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index d6b528b4..255917db 100644
+index d6b528b4..5b1eeb1b 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -4433,6 +4433,23 @@ dependencies = [
@@ -26,33 +26,6 @@ index d6b528b4..255917db 100644
  [[package]]
  name = "gnosis_vpn-ctl"
  version = "1.2.1"
-@@ -8427,7 +8444,7 @@ dependencies = [
-  "quinn-udp 0.5.16",
-  "rustc-hash",
-  "rustls",
-- "socket2 0.6.5",
-+ "socket2 0.5.10",
-  "thiserror 2.0.21",
-  "tokio",
-  "tracing",
-@@ -8467,7 +8484,7 @@ dependencies = [
-  "cfg_aliases",
-  "libc",
-  "once_cell",
-- "socket2 0.6.5",
-+ "socket2 0.5.10",
-  "tracing",
-  "windows-sys 0.61.2",
- ]
-@@ -8480,7 +8497,7 @@ checksum = "47091c86514c2e11452cb228dee77037334b99d92a23e4c69aa5982261f39247"
- dependencies = [
-  "cfg_aliases",
-  "libc",
-- "socket2 0.6.5",
-+ "socket2 0.5.10",
-  "windows-sys 0.61.2",
- ]
- 
 diff --git a/gnosis_vpn-ipc/src/dirs.rs b/gnosis_vpn-ipc/src/dirs.rs
 index 07469a31..84217fe6 100644
 --- a/gnosis_vpn-ipc/src/dirs.rs
@@ -139,7 +112,7 @@ index 7275c743..27e2c466 100644
          let (tun_writer, tun_reader) = tun;
          let cancel = self.cancel.clone();
 diff --git a/gnosis_vpn-lib/src/core/mod.rs b/gnosis_vpn-lib/src/core/mod.rs
-index a12a6e53..db083d64 100644
+index a12a6e53..422ad4e3 100644
 --- a/gnosis_vpn-lib/src/core/mod.rs
 +++ b/gnosis_vpn-lib/src/core/mod.rs
 @@ -378,6 +378,11 @@ impl Core {
@@ -154,6 +127,17 @@ index a12a6e53..db083d64 100644
      }
  
      async fn shut_down(&mut self) {
+@@ -2966,6 +2971,10 @@ fn nerd_stats_telemetry() -> Option<String> {
+ 
+ /// The armed killswitch blocks every relayer route but the attempt's side-car, so deposits wait for it.
+ fn pix_deposits_held(phase: &Phase, killswitch_armed: bool) -> bool {
++    // Android: no killswitch blocks the relayer (the app is excluded from its own VPN), and there is no side-car.
++    if cfg!(target_os = "android") {
++        return false;
++    }
+     let sidecar_open = match phase {
+         Phase::Connecting(conn) | Phase::Connected(conn) => conn.relayer_sidecar.is_some(),
+         _ => false,
 diff --git a/gnosis_vpn-lib/src/dirs.rs b/gnosis_vpn-lib/src/dirs.rs
 index d13c9dfb..4f550d7e 100644
 --- a/gnosis_vpn-lib/src/dirs.rs
@@ -180,6 +164,34 @@ index 4238698a..96b33559 100644
  pub const DEFAULT_DB_PATH: &str = "/usr/share/gnosisvpn/geoip.mmdb";
  #[cfg(target_os = "macos")]
  pub const DEFAULT_DB_PATH: &str = "/usr/local/share/gnosisvpn/geoip.mmdb";
+diff --git a/gnosis_vpn-lib/src/hopr/api.rs b/gnosis_vpn-lib/src/hopr/api.rs
+index e3e9ed60..406abe4e 100644
+--- a/gnosis_vpn-lib/src/hopr/api.rs
++++ b/gnosis_vpn-lib/src/hopr/api.rs
+@@ -166,7 +166,10 @@ impl Hopr {
+         destination: Address,
+         cfg: HoprSessionClientConfig,
+     ) -> Result<Option<RelayerSidecarHandle>, HoprError> {
+-        if !cfg!(feature = "pix-curvy") {
++        // Android: the app is excluded from its own VPN, so the relayer is reached directly and never
++        // waits behind the tunnel it pays for; no side-car (exits that do not carry it yet would fail
++        // every payment through it).
++        if !cfg!(feature = "pix-curvy") || cfg!(target_os = "android") {
+             return Ok(None);
+         }
+         let target = self
+@@ -534,7 +537,10 @@ impl Hopr {
+             .port_or_known_default()
+             .ok_or_else(|| HoprError::TelemetryReactorStart(format!("relayer URL {url} has no port")))?;
+         let _ = self.relayer.target.set(format!("{host}:{port}"));
+-        pix.pool.relayer_via = Some(self.relayer.via);
++        // Android opens no side-car (open_relayer_sidecar), so the pool calls the relayer directly.
++        if !cfg!(target_os = "android") {
++            pix.pool.relayer_via = Some(self.relayer.via);
++        }
+         Ok(pix)
+     }
+ 
 diff --git a/gnosis_vpn-lib/src/hopr/pix_config.rs b/gnosis_vpn-lib/src/hopr/pix_config.rs
 index 0428601a..7db79995 100644
 --- a/gnosis_vpn-lib/src/hopr/pix_config.rs

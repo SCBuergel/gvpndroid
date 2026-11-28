@@ -112,7 +112,10 @@ e2e)
     order=$(corelog | grep -oE "tunnel access access=(GatewayOnly|Open)|connection established successfully" | sed 's/(.*//' | tr '\n' '|')
     echo "info: tunnel stages: $order"
     check "user traffic held (gateway only) until the exit served, then let through" 'echo "$order" | grep -qE "access=GatewayOnly[^|]*\|tunnel access access=Open\|connection established"'
-    ip=$(pubip); echo "info: public IP through the tunnel: ${ip:-none}; the device's own: ${host_ip:-unknown (lookup failed)}"
+    # An exit without strict prepay serves the first ping on its free allowance and then holds traffic
+    # until it sees the payment it asks for right after; so retry for a while.
+    ip=""; for _ in 1 2 3 4 5 6 7 8; do ip=$(pubip); [ -n "$ip" ] && break; sleep 10; done
+    echo "info: public IP through the tunnel: ${ip:-none}; the device's own: ${host_ip:-unknown (lookup failed)}"
     # Both must be known: an empty host_ip would let any reply, even a leak, pass.
     check "public IP through the tunnel differs from the device's own" '[ -n "$ip" ] && [ -n "$host_ip" ] && [ "$ip" != "$host_ip" ]'
 

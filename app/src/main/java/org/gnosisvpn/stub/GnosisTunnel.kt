@@ -215,10 +215,11 @@ class GnosisTunnel(private val context: Context) : Tunnel {
     private fun startCoreOnce(props: Properties) {
         if (coreRunning) return
         GnosisNative.loadError?.let { error("native core not available: $it") }
-        // A lab block from an older version is brought up to date (LabExits.apply is idempotent).
-        if (LabExits.isOn(dir)) File(dir, "gnosis.toml").let { f -> LabExits.apply(f.readText(), true).let { if (it != f.readText()) f.writeText(it) } }
-        // Without a lab block when no lab exits exist any more (LabExits.EXITS), also in a config written earlier.
-        val config = LabExits.apply(File(dir, "gnosis.toml").readText(), LabExits.isOn(dir))
+        // The lab block as the toggle wants it (LabExits.apply is idempotent): brought up to date when on,
+        // and dropped when off or when no lab exits exist any more (LabExits.EXITS), also in a config
+        // an older version wrote. Written back, so the developer screen's config matches the core's.
+        val toml = File(dir, "gnosis.toml")
+        val config = LabExits.apply(toml.readText(), LabExits.isOn(dir)).also { if (it != toml.readText()) toml.writeText(it) }
         val data = File(dir, "gnosis").apply { mkdirs() }
         val cache = File(context.cacheDir, "gnosis").apply { mkdirs() }
         val level = LogLevel.get(context)

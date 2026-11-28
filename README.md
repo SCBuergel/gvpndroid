@@ -70,10 +70,11 @@ code.
    and links to the Gnosis VPN funding site, where you can pay from a wallet or redeem a funding
    code. The app continues by itself once the funds arrive.
 5. **Connect.** Pick an exit or let the app choose one. The first connection opens a payment
-   channel on chain, which can take a minute or two. Every connect then waits about 40 s on
-   "Opening the route and paying the exit": the core pays the exit first and attaches the
-   tunnel only once the exit can see the payment, so traffic does not stop at the exit's free
-   allowance (about 14 MB).
+   channel on chain, which can take a minute or two. The connect then goes through "Opening the
+   tunnel", "Paying the exit" and "Payment sent, waiting for the exit to see it" as the exit asks
+   for it: the core lets only its own pings to the exit through until the exit answers, so your
+   traffic starts once the exit serves it. An exit that asks for its payment only after a few
+   megabytes can still pause your traffic for a short while then, until it sees the payment.
 6. **Optional: turn on Lockdown** from the app, which opens Android's VPN settings, so no
    traffic leaves the phone outside the VPN.
 

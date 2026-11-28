@@ -106,7 +106,7 @@ The UI never needs to know which backend it talks to.
 - **`App.kt`:** picks the backend and enables exactly one of the two VpnServices, so Always-on
   VPN starts the backend in use.
 - **`LogBuffer.kt`, `LogLevel.kt`:** the on-screen log, which includes the core's lines because
-  a phone has no logcat to read them from. Levels are normal, verbose and debug.
+  a phone has no logcat to read them from. Levels are normal, verbose, paths (verbose plus the path planner) and debug.
 - **`MainActivity.kt`:** the original stub screen, now Settings → Developer screen. It has the
   backend switch, Gnosis setup, identity export, the log level, "Send logs now" (debug relay,
   `DebugLogRelay.sendNow`), the lab-exit toggle, the funding QR code and the raw log.
@@ -191,18 +191,26 @@ adb logcat -s GnosisUi    # "screen F2 Auto: Current Best Location", "notify u4 
     `tap::set_access` applies the killswitch stages: while `GatewayOnly`, packets from Android to
     anyone but the gateway are dropped. The bridge routes the core's `Ping` and
     `KillswitchLockdown` requests to them.
+  - It turns the relayer side-car off on Android (`Hopr::open_relayer_sidecar` returns none,
+    the PIX pool gets no `relayer_via`, and `pix_deposits_held` never holds deposits): the app is
+    excluded from its own VPN, so it reaches the Curvy relayer directly. On 2026-11-28 the
+    production exits accepted the side-car session but returned nothing through it (the client
+    sent its TLS hello, 0 bytes came back; GVPN-LT-1, GVPN-FRA-1, Bonnie Prince Charlie), so every
+    payment through it failed and the exit kept holding traffic.
   - It makes `Core::start` shut the node down on every return, because in the app no process
     exit does that.
-  - Its `Cargo.lock` adds the bridge crate's entry (`build-remote.sh` builds `--locked`).
+  - Its `Cargo.lock` adds the bridge crate's entry, and nothing else (`build-remote.sh` builds `--locked`).
 - **The client commit (since 0.0.6):** upstream gnosis/gnosis_vpn-client main `e816fe16` (v1.2.1,
   IPC v6), with no fork commits. It contains the fixes we drafted for payment stalls in their
   merged form:
   - **The relayer side-car (#1089):** each connect first opens a free session to the Curvy
     relayer through the same exit, and the PIX pool sends its relayer calls there (edgli
     `relayer_via`). Deposits are held until it is open. An exit that refuses the relayer as a
-    target fails the attempt (issue `payment_route_unavailable`).
+    target fails the attempt (issue `payment_route_unavailable`). Off on Android (the patch).
   - **The payment hold (#1090):** after the pump is up only the gateway gets through; the core
-    pings it until the exit answers, which under strict prepay means it has seen the deposit
+    pings it until the exit answers, which under strict prepay means it has seen the deposit. An
+    exit without strict prepay answers at once on its free allowance and holds traffic a little
+    later, when it asks for the payment
     (phase `awaiting_payment`/`verify_ping`, step `paying`). Then user traffic is let through.
     On Android both run through the tap above, so the app shows the core's `step` and `issue`
     and counts the session as connected only from `adjust_to_main` on.
